@@ -231,7 +231,7 @@ quarantine: []                # {test, reason, expires: YYYY-MM-DD}
 - `.github/CODEOWNERS`: owner on gate files and test directories.
 - Optional and only on evidence: `.claude/skills/<proj>-gotchas/SKILL.md` (each line dated, with an incident link), `.claude/rules/<area>.md` with `paths:`.
 
-### 3.9 `fx` launcher (`bin/fx`, POSIX shell or Python, ≤ 150 lines)
+### 3.9 `fx` launcher (`bin/fx`, Python, ≤ 345 lines: D16)
 **Revised by D23:**
 - `fx` passes no model or effort flags; the user's settings apply.
 - `fx shape` and `fx build` return at once when a session calls them (a detached launch: Phase 1b, item 11).
