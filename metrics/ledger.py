@@ -11,7 +11,7 @@ import factory_lib as fl  # noqa: E402
 FIELDS = ["date", "repo", "issue", "tier", "tier_src", "sessions", "tokens", "pr", "packet_ok", "parent"]
 KINDS = {"input_tokens": "input", "output_tokens": "output", "cache_creation_input_tokens": "cache_creation",
          "cache_read_input_tokens": "cache_read"}
-BUILD_PROMPT = "Implement the spec in"
+BUILD_PROMPT, SHAPE_PROMPTS = "Implement the spec in", ("/factory:shape", "<command-message>factory:shape</command-message>")
 
 def jsonl(path):  # parsed dict lines; unreadable or malformed lines are skipped
     try:
@@ -122,7 +122,7 @@ def cmd_audit(a):
     last = {x.get("session_id"): x.get("decision") for x in stops}  # each session's last Stop decision
     build = {x.get("session_id") for x in logs if x.get("hook") == "reinject" and x.get("phase") == "build"}
     build |= {sid for sid, (mains, _) in sessions().items() if (p := first_prompt(mains).lstrip()).startswith(BUILD_PROMPT)
-              or not p.startswith("/factory:shape") and any(build_wt(c) for c in {d.get("cwd") for d in mains})}
+              or not p.startswith(SHAPE_PROMPTS) and any(build_wt(c) for c in {d.get("cwd") for d in mains})}
     unguarded = sorted(str(s) for s in build - {x.get("session_id") for x in stops} if s)
     shipped_ok = {(x.get("repo"), str(x.get("issue"))) for x in logs
                   if x.get("hook") == "fx_ship" and x.get("decision") == "ship" and x.get("verify_ok") is True}

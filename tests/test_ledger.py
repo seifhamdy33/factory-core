@@ -121,6 +121,8 @@ class Ledger(FactoryTest):
         src = str(wt / "src")
         self.transcript("i", [{"type": "user", "cwd": src, "message": {"content": "continue please"}}])
         self.transcript("j", [{"type": "user", "cwd": src, "message": {"content": "/factory:shape 9"}}])  # shape: no gate
+        self.transcript("k", [{"type": "user", "cwd": src, "message": {"content":  # how a typed slash command is stored
+            "<command-message>factory:shape</command-message>\n<command-name>/factory:shape</command-name>\n<command-args>9</command-args>"}}])
         self.transcript("a", [{"type": "user", "cwd": src, "message": {"content": "go on"}}])  # has stop lines
         write(self.home / "metrics" / "ledger.csv", "date,repo,issue,tier,tier_src,sessions,tokens,pr,packet_ok,parent\n"
               "d,o/r,7,1,label,1,{},u7,true,\nd,o/r,8,1,label,1,{},u8,true,\n")
