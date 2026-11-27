@@ -177,8 +177,8 @@ class Waiting(FactoryTest):
 
 
 class Flows(FactoryTest):
-    def main_repo(self):
-        main = self.repo(branch="main-work")  # the overlay lands on main, as after the overlay PR merges
+    def main_repo(self, **kw):
+        main = self.repo(branch="main-work", **kw)  # the overlay lands on main, as after the overlay PR merges
         git(main, "checkout", "-q", "main")
         git(main, "merge", "-q", "main-work")
         return main
@@ -325,6 +325,30 @@ class Flows(FactoryTest):
         self.assertTrue(fake.has("git", "fetch", "origin"))
         code, _, err, _ = self.fx_in(main, fake, "shape", "7")  # rerun reuses the worktree
         self.assertEqual(code, 0, err)
+        self.assertEqual([c for c in fake.calls if c[0] not in ("git", "gh")], [])  # no setup key: nothing else runs
+
+    def test_ShapeRunsSetupOncePerWorktree(self):
+        main = self.main_repo(cfg='project = "demo"\nsetup = ["fx-setup-probe", "--frozen"]\n')
+        git(main, "update-ref", "refs/remotes/origin/main", "main")
+        fake = FakeRun({"gh issue view": {"title": "Add the Thing", "labels": [], "body": ""}})
+        code, out, err, launch = self.fx_in(main, fake, "shape", "7")
+        self.assertEqual(code, 0, err)
+        self.assertEqual([c for c in fake.calls if c[0] == "fx-setup-probe"], [["fx-setup-probe", "--frozen"]])
+        self.assertIn("Setting up the worktree: fx-setup-probe --frozen", out)
+        wt = (main / ".." / "demo-worktrees").resolve() / "7-add-the-thing"
+        self.assertTrue(fl.load_json(wt / ".factory" / "work" / "7" / "state.json")["setup_done"])
+        launch.assert_called_once()
+        code, _, err, _ = self.fx_in(main, fake, "shape", "7")  # already set up: not run again
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len([c for c in fake.calls if c[0] == "fx-setup-probe"]), 1)
+
+    def test_ShapeSetupAcceptsOneString(self):
+        main = self.main_repo(cfg='project = "demo"\nsetup = "fx-setup-probe --frozen"\n')
+        git(main, "update-ref", "refs/remotes/origin/main", "main")
+        fake = FakeRun({"gh issue view": {"title": "Add the Thing", "labels": [], "body": ""}})
+        code, _, err, _ = self.fx_in(main, fake, "shape", "7")
+        self.assertEqual(code, 0, err)
+        self.assertEqual([c for c in fake.calls if c[0] == "fx-setup-probe"], [["fx-setup-probe", "--frozen"]])
 
     def test_CleanNeedsMerged(self):
         main, wt, ctx = self.worktree(pr="https://github.com/o/r/pull/12")

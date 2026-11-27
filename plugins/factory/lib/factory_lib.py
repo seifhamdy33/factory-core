@@ -5,7 +5,7 @@ from pathlib import Path
 
 PACKET_KEYS = ("intent", "ac", "changed", "deviations", "test_changes", "new_deps", "look_here", "not_verified", "rollback")
 DEFAULTS = {
-    "project": "", "quarantine": [], "branch_types": [],
+    "project": "", "quarantine": [], "branch_types": [], "setup": [],
     "tests": ["tests/**", "test/**", "**/test_*.py", "**/*_test.py", "**/*.test.*", "**/*.spec.*"],
     "acceptance_glob": "tests/acceptance/test_{issue}_*", "specs_dir": "docs/specs", "spec_name": "{issue}-{slug}.md",
     "branch": "f/{issue}-{slug}", "worktree_root": "../{project}-worktrees", "worktree_name": "{issue}-{slug}",

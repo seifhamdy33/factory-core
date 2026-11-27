@@ -11,7 +11,7 @@ BUDGETS = {
     "plugins/factory/skills/idea/SKILL.md": 30,
     "plugins/factory/skills/shape/SKILL.md": 120,
     "plugins/factory/skills/ship/SKILL.md": 40,
-    "bin/fx": 340,  # owner 2026-11-27: raised from 220 (waiting list, pin check and ship mechanics)
+    "bin/fx": 345,  # owner 2026-11-27: raised from 220 to 340 (waiting list, pin check, ship), then to 345 (setup)
     "bin/fx.cmd": 1,
     "ci/gates.py": 200,
     "ci/tier.py": 200,
