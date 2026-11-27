@@ -27,19 +27,18 @@ jobs:
       - name: budgets and dependencies
         shell: bash
         run: python -m unittest tests.test_budgets -q
-  old-python:  # hooks run under the user's python3, which can be older than 3.11 (macOS ships 3.9)
-    runs-on: ubuntu-latest
+  old-python:  # hooks run under the user's python3, which can be older than 3.11: macOS's own /usr/bin/python3
+    runs-on: macos-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.9"
       - name: hooks exit 0 silently, fx refuses
         shell: bash
         run: |
+          python() { /usr/bin/python3 "$@"; }
+          python -c 'import sys; print(sys.version); assert sys.version_info < (3, 11), "not an old python"'
           for h in stop_verify test_lock reinject; do
             out=$(echo '{}' | python plugins/factory/hooks/$h.py 2>&1) || { echo "$h exited $?"; exit 1; }
             [ -z "$out" ] || { echo "$h printed: $out"; exit 1; }
