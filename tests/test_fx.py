@@ -1,4 +1,4 @@
-import contextlib, datetime, importlib.machinery, importlib.util, io, json, os, shutil
+import contextlib, importlib.machinery, importlib.util, io, json, os, shutil
 from pathlib import Path
 from unittest import mock
 
@@ -61,18 +61,18 @@ class Pure(FactoryTest):
         dflt = fl.load_cfg_text('project = "p"\n')
         self.assertEqual(fx.names(dflt, "7", "Add thing", []), ("f/7-add-thing", "7-add-thing"))
 
-    def test_ModelPerTier(self):
-        self.assertEqual([fx.MODELS[t] for t in range(4)],
-                         [("sonnet", "medium"), ("sonnet", "medium"), ("opus", "medium"), ("opus", "high")])
+    def test_LaunchPassesNoModelFlags(self):  # D23: the user's own model, effort and settings
+        with mock.patch.object(fx.subprocess, "call", return_value=0) as c, contextlib.redirect_stdout(io.StringIO()):
+            fx.launch(self.tmp, "/factory:shape 7", "shape")
+        self.assertEqual(c.call_args.args[0][1:], ["/factory:shape 7"])
+        env = c.call_args.kwargs["env"]
+        self.assertEqual(env["FACTORY_PHASE"], "shape")
+        self.assertNotIn("CLAUDE_CODE_USE_POWERSHELL_TOOL", set(env) - set(os.environ))
 
     def test_LabelTier(self):
         self.assertEqual(fx.label_tier([{"name": "tier:T0"}, {"name": "bug"}]), 0)
         self.assertEqual(fx.label_tier([{"name": "tier:T1"}, {"name": "tier:T3"}]), 3)
         self.assertEqual(fx.label_tier([], default=2), 2)
-
-    def test_CloudRefused(self):
-        code, _, err = call("build", "7", "--cloud")
-        self.assertEqual((code, err), (1, "fx build: Phase 1 is local-only.\nNext: fx build 7\n"))
 
     def test_RefRefusals(self):
         root = self.repo()
@@ -86,23 +86,6 @@ class Pure(FactoryTest):
             code, _, err = call("build", "7")
         self.assertEqual(code, 1)
         self.assertIn("is not a factory repo", err)
-
-    def test_WeeklyPromptOnlyOnTty(self):
-        day = datetime.date(2026, 11, 27)
-        with mock.patch.object(fx.sys.stdin, "isatty", return_value=False), mock.patch("builtins.input") as ask:
-            fx.weekly(day)
-        ask.assert_not_called()
-        with mock.patch.object(fx.sys.stdin, "isatty", return_value=True), \
-                mock.patch("builtins.input", side_effect=EOFError):  # Windows NUL stdin claims to be a tty
-            fx.weekly(day)
-        self.assertFalse((self.home / "metrics" / "weekly.csv").exists())
-        with mock.patch.object(fx.sys.stdin, "isatty", return_value=True), \
-                mock.patch("builtins.input", return_value=" 42% ") as ask:
-            fx.weekly(day)
-            fx.weekly(day + datetime.timedelta(days=1))  # same ISO week: not asked again
-        ask.assert_called_once_with("Weekly /usage % (Enter to skip): ")
-        self.assertEqual((self.home / "metrics" / "weekly.csv").read_text("utf-8"),
-                         "week,date,usage_pct\n2026-W48,2026-11-27,42\n")
 
 
 def repo_entry(key, prs, wts=None, approver="the-approver"):
@@ -259,13 +242,14 @@ class Flows(FactoryTest):
         block = "+++\nid = 7\ntier = 1\n+++\n## Goal\nx"
         fake = FakeRun({"gh issue view": {"title": "Add thing", "labels": [{"name": "tier:T1"}],
                                           "body": f"intro\n<!-- factory:spec -->\n{block}\n<!-- /factory:spec -->\n"}})
+        write(ctx["work"] / "spec.md", "stale copy from an earlier build\n")
         code, _, err, launch = self.fx_in(main, fake, "build", "7")
         self.assertEqual(code, 0, err)
-        self.assertEqual((ctx["work"] / "spec.md").read_text("utf-8"), block + "\n")
+        self.assertEqual((ctx["work"] / "spec.md").read_text("utf-8"), block + "\n")  # always rewritten from the issue
         st = fl.load_json(ctx["work"] / "state.json")
         self.assertEqual((st["phase"], st["tier"], st["spec_path"]), ("build", 1, ".factory/work/7/spec.md"))
-        cwd, t, prompt, phase = launch.call_args.args
-        self.assertEqual((Path(cwd), t, phase), (wt, 1, "build"))
+        cwd, prompt, phase = launch.call_args.args
+        self.assertEqual((Path(cwd), phase), (wt, "build"))
         self.assertTrue(prompt.startswith("Implement the spec in .factory/work/7/spec.md. Keep .factory/work/7/progress.md"))
         self.assertNotIn("/code-review", prompt)
         for ch in '<>|&%"':
@@ -277,7 +261,7 @@ class Flows(FactoryTest):
         code, _, err, launch = self.fx_in(main, fake, "build", "7")
         self.assertEqual(code, 0, err)
         self.assertEqual((ctx["work"] / "intent.md").read_text("utf-8"), "# Fix typo\n\nIn the README.\n")
-        self.assertEqual(launch.call_args.args[1], 0)
+        self.assertEqual(fl.load_json(ctx["work"] / "state.json")["tier"], 0)
 
     def test_BuildT2NeedsPin(self):
         main, wt, ctx = self.worktree(tier=2)
@@ -293,8 +277,8 @@ class Flows(FactoryTest):
         with mock.patch.object(fx, "pin_ok", return_value=True):
             code, _, err, launch = self.fx_in(main, fake, "build", "7")
         self.assertEqual(code, 0, err)
-        self.assertIn("run `/code-review medium`", launch.call_args.args[2])
-        self.assertEqual(launch.call_args.args[1], 2)
+        self.assertIn("run `/code-review medium`", launch.call_args.args[1])
+        self.assertEqual(fl.load_json(ctx["work"] / "state.json")["tier"], 2)
 
     def test_PinOkComparesLatestPin(self):
         _, wt, ctx = self.worktree()
@@ -321,7 +305,7 @@ class Flows(FactoryTest):
         self.assertEqual({k: st[k] for k in ("issue", "repo", "branch", "parent", "phase", "tier")},
                          {"issue": "7", "repo": "o/r", "branch": "f/7-add-the-thing", "parent": "o/ws#1",
                           "phase": "shape", "tier": 2})
-        self.assertEqual(launch.call_args.args[1:], (3, "/factory:shape 7", "shape"))
+        self.assertEqual(launch.call_args.args[1:], ("/factory:shape 7", "shape"))
         self.assertTrue(fake.has("git", "fetch", "origin"))
         code, _, err, _ = self.fx_in(main, fake, "shape", "7")  # rerun reuses the worktree
         self.assertEqual(code, 0, err)
@@ -366,8 +350,7 @@ class Flows(FactoryTest):
     def test_StatusEndToEnd(self):
         main, wt, ctx = self.worktree(ship="failed:unit")
         fake = FakeRun({"gh pr list": []})
-        with mock.patch.object(fx.sys.stdin, "isatty", return_value=False):
-            code, out, err, _ = self.fx_in(main, fake, "status")
+        code, out, err, _ = self.fx_in(main, fake, "status")
         self.assertEqual(code, 0, err)
         self.assertIn("7      T1    build", out)
         self.assertIn("Waiting on you:\n- 7: ship failed at unit. Next: `fx build 7`", out)

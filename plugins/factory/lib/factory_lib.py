@@ -3,7 +3,7 @@ import contextlib, copy, datetime, hashlib, json, os, re, shutil, signal, subpro
 from functools import lru_cache
 from pathlib import Path
 
-PACKET_KEYS = ("intent", "ac", "changed", "deviations", "test_changes", "new_deps", "look_here", "not_verified", "rollback")
+PACKET_KEYS = ("intent", "ac", "changed", "needs_you", "not_verified", "rollback")  # an overlay may add more keys
 DEFAULTS = {
     "project": "", "quarantine": [], "branch_types": [], "setup": [],
     "tests": ["tests/**", "test/**", "**/test_*.py", "**/*_test.py", "**/*.test.*", "**/*.spec.*"],
@@ -15,8 +15,7 @@ DEFAULTS = {
                                       "**/tsconfig*.json", "**/.coveragerc", "**/.nycrc*"]},
     "authority": {"approver": ""},
     "packet": {"max_lines": 40, "extra": [], "headings": dict(zip(PACKET_KEYS, (
-        "## Intent", "## Acceptance checks", "## What changed", "## Deviations from spec", "## Test changes",
-        "## New dependencies", "## Look here", "## Not verified", "## Rollback")))},
+        "## Intent", "## Acceptance checks", "## What changed", "## Needs you", "## Not verified", "## Rollback")))},
 }
 USER_DEFAULTS = {"verify_slots": 2, "lock_wait_s": 300, "session": {"build_note": ""}}
 GATE_FILES = [".claude/**", ".factory/**", ".github/**", "CLAUDE.md", "**/CLAUDE.md", "**/CODEOWNERS"]
@@ -242,6 +241,6 @@ def packet_check(text, cfg, tier):  # -> list of problems (empty = ok); tier is 
         body = m.group(1).strip() if m else ""
     if tier >= 1 and not body:
         probs.append(f"'Not verified' is empty (under {nv!r})")
-    if tier >= 2 and not re.search(r"^Review: /code-review \w+, \d+ findings", text, re.M):
-        probs.append("T2+ needs a line 'Review: /code-review <level>, <n> findings'")
+    if tier >= 2 and not re.search(r"^Review: .+, \d+ findings", text, re.M):  # any reviewer the user's setup runs
+        probs.append("T2+ needs a line 'Review: <reviewer>, <n> findings'")
     return probs

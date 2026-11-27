@@ -41,7 +41,7 @@ class Templates(FactoryTest):
 
 class Skills(unittest.TestCase):
     def test_FrontmatterAndCoreLine(self):
-        for name in ("idea", "shape", "ship"):
+        for name in ("idea", "shape"):
             text = (SKILLS / name / "SKILL.md").read_text("utf-8")
             front = re.match(r"---\n(.*?)\n---\n", text, re.S)
             assert front, name

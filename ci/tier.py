@@ -11,7 +11,6 @@ DEP_GLOBS = ["**/" + n for n in (
     "package.json", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb",
     "pyproject.toml", "poetry.lock", "uv.lock", "Pipfile", "Pipfile.lock", "requirements*.txt", "setup.py", "setup.cfg",
     "go.mod", "go.sum", "Cargo.toml", "Cargo.lock", "Gemfile", "Gemfile.lock", "composer.json", "composer.lock")]
-MAX_CODE_LINES, MAX_FILES, MAX_DOC_LINES = 150, 6, 30
 NOT_EVALUATED = "coverage of changed lines is not evaluated in Phase 1"
 
 def tier_num(value):
@@ -43,16 +42,11 @@ def compute(files, cfg, flags=(), declared=None):
         if flag.kind.startswith("raise:T"):
             cands.append((int(flag.kind[-1]), f"integrity {flag.code}: {flag.msg}"))
     docs = [f for f in files if all(fl.any_match(t["docs_globs"], n) for n in names(f))]
-    code = sum(lines(f) for f in files if f not in docs)
-    if code > MAX_CODE_LINES:
-        cands.append((2, f"{code} code lines > {MAX_CODE_LINES}"))
-    if len(files) > MAX_FILES:
-        cands.append((2, f"{len(files)} files > {MAX_FILES}"))
-    total = sum(lines(f) for f in files)
+    code, total = sum(lines(f) for f in files if f not in docs), sum(lines(f) for f in files)  # size is information only (D23)
     if cands:
         computed = max(c for c, _ in cands)
         why = list(dict.fromkeys(r for c, r in sorted(cands, key=lambda c: -c[0])))
-    elif len(docs) == len(files) and total <= MAX_DOC_LINES:
+    elif len(docs) == len(files):
         computed, why = 0, [f"docs only, {total} lines"]
     else:
         computed, why = 1, [f"{len(files)} files, {code} code lines"]

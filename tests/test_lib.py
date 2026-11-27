@@ -281,7 +281,12 @@ class Packet(unittest.TestCase):
 
     def test_ReviewLineT2(self):
         self.assertIn("Review:", fl.packet_check(packet(), self.cfg, 2)[0])
-        self.assertEqual(fl.packet_check(packet(look_here="Review: /code-review medium, 2 findings"), self.cfg, 2), [])
+        self.assertEqual(fl.packet_check(packet(needs_you="Review: /code-review medium, 2 findings"), self.cfg, 2), [])
+        self.assertEqual(fl.packet_check(packet(needs_you="Review: fresh-context subagent, 0 findings"), self.cfg, 2), [])
+
+    def test_OverlayKeyStillRequired(self):  # D23: keys dropped from the defaults stay required where an overlay sets them
+        cfg = fl.load_cfg_text('project = "x"\n[packet.headings]\ndeviations = "## Deviations from spec"\n')
+        self.assertEqual(fl.packet_check(packet(), cfg, 1), ["missing heading '## Deviations from spec'"])
 
 
 if __name__ == "__main__":

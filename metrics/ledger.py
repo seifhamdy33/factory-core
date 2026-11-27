@@ -100,8 +100,8 @@ def cmd_summary(a):
     paired = sum(len({r["repo"] for r in rows if r["parent"] == par}) >= 2 for par in {r["parent"] for r in rows} - {""})
     print(f"shipped={len(rows)} t2={sum(r['tier'] == '2' for r in rows)} t3={sum(r['tier'] == '3' for r in rows)} paired={paired} "
           f"packet_ok={sum(r['packet_ok'] == 'true' for r in rows)}/{len(rows)} declared_tier={sum(r['tier_src'] == 'declared' for r in rows)}")
-    weeks = read_csv(fl.home() / "metrics" / "weekly.csv")
-    print("weekly /usage %: " + (", ".join(f"{w['week']} {w['usage_pct'] or '-'}" for w in weeks) or "none recorded"))
+    if weeks := read_csv(fl.home() / "metrics" / "weekly.csv"):  # only if the user's statusline writes one (D23)
+        print("weekly /usage %: " + ", ".join(f"{w['week']} {w['usage_pct'] or '-'}" for w in weeks))
 
 def first_prompt(mains):
     for d in mains:
