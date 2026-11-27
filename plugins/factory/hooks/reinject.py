@@ -33,7 +33,8 @@ def run(data):
         for i, (p, end, text) in enumerate(files):
             head = f"\n\n--- {p} ---\n"
             out += head + clip(text, (LIMIT - len(out) - len(head)) // (len(files) - i), end)
-    fl.log("reinject", ctx, session_id=data.get("session_id"), decision=src, reason="inject", chars=len(out))
+    fl.log("reinject", ctx, session_id=data.get("session_id"), decision=src, reason="inject", chars=len(out),
+           plugin_root=str(Path(__file__).resolve().parents[1]))  # SP1: the live checkout or the plugin cache copy
     return out
 
 if __name__ == "__main__":

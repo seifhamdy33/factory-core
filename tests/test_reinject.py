@@ -18,6 +18,7 @@ class Reinject(FactoryTest):
                                             "Factory session: phase build, issue #7, spec .factory/work/7/spec.md."])
         rec = self.log_lines()[0]
         self.assertEqual((rec["hook"], rec["decision"], rec["phase"], rec["session_id"]), ("reinject", "startup", "build", "s1"))
+        self.assertEqual(rec["plugin_root"], str((CORE / "plugins" / "factory").resolve()))  # SP1: which copy ran
 
     def test_ShapeHasNoBuildNote(self):
         self.user_config(f'[session]\nbuild_note = "{NOTE}"\n')
