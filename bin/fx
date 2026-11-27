@@ -147,9 +147,10 @@ def cmd_build(a):
         spec_path = f"{rel}/intent.md"
         (wt / spec_path).write_text(f"# {iss['title']}\n\n{(iss['body'] or '').strip()}\n", "utf-8")
     fl.save_state(w, phase="build", tier=t, spec_path=spec_path)
+    notes = fl.notes_path(w).relative_to(wt).as_posix()
     review = (" When fast verify passes, run `/code-review medium`, fix the findings you can demonstrate with a failing"
               " test, and list the rest under Needs you." if t >= 2 else "")
-    return launch(wt, f"Implement the spec in {spec_path}. Keep {rel}/progress.md current. Run `fx verify --fast` and"
+    return launch(wt, f"Implement the spec in {spec_path}. Keep {notes} current. Run `fx verify --fast` and"
                   f" `fx ship` with the Bash tool's run_in_background, and wait for their result.{review} Then write"
                   f" {rel}/packet.md from {CORE.as_posix()}/plugins/factory/templates/packet.md using this repo's"
                   f" [packet] headings, and run `fx ship {n}`.", "build")
@@ -220,9 +221,9 @@ def cmd_clean(a):
     ledger(w, pr["url"])  # replaces the row, so review fixes after ship are counted
     arch = fl.home() / "archive" / w["repo"] / n
     arch.mkdir(parents=True, exist_ok=True)
-    for f in ("progress.md", "packet.md"):
-        if (w["work"] / f).is_file():
-            shutil.copy2(w["work"] / f, arch / f)
+    for f in (fl.notes_path(w), w["work"] / "packet.md"):
+        if f.is_file():
+            shutil.copy2(f, arch / f.name)
     main = main_root(w["root"])
     run(["git", "worktree", "remove", w["root"]], main)  # refuses when the worktree has changes
     run(["git", "branch", "-D", w["branch"]], main)  # only because GitHub says the PR is merged
@@ -277,10 +278,10 @@ def waiting(repos):  # the "Waiting on you" list; approver and order come from c
                                                    if w["state"].get("parent") == par and w["state"].get("pr") in first_open), None)
             out.append(f"merge {first['key']} PR {dep} first: {p['url']}" if dep else f"review/merge: {p['url']}")
         for i, w in sorted(r["wts"].items()):
-            st, prog = w["state"], Path(w["path"]) / ".factory" / "work" / i / "progress.md"
+            st, prog = w["state"], fl.notes_path({"root": Path(w["path"]), "issue": i})
             if str(st.get("ship", "")).startswith("failed:"):
                 out.append(f"{ref_of(r, i)}: ship failed at {st['ship'][7:]}. Next: `fx build {ref_of(r, i)}`")
-            if prog.is_file() and re.search(r"^## Blocker", prog.read_text("utf-8", "replace"), re.M):
+            if prog.is_file() and fl.BLOCKER.search(prog.read_text("utf-8", "replace")):
                 out.append(f"unblock: {prog}")
             if by_url.get(st.get("pr"), {}).get("state") == "MERGED":
                 out.append(f"`fx clean {ref_of(r, i)}`")

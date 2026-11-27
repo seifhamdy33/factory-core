@@ -134,6 +134,12 @@ class Waiting(FactoryTest):
             "8: ship failed at unit,lint. Next: `fx build 8`",
             f"unblock: {blocked['path'] / '.factory' / 'work' / '9' / 'progress.md'}"])
 
+    def test_UserNotesBlockedIsWaiting(self):
+        self.user_config('[session]\nnotes = ".claude-work/TASKS.md"\n')
+        w = self.wt("9", branch="f/9-b")
+        write(w["path"] / ".claude-work" / "TASKS.md", "# T\n## Blocked\n- which region?\n")
+        self.assertEqual(fx.waiting([repo_entry(None, [], {"9": w})]), [f"unblock: {w['path'] / '.claude-work' / 'TASKS.md'}"])
+
     def test_EmptyWorkspace(self):
         self.assertEqual(fx.waiting([]), [])
         with contextlib.chdir(self.repo()):

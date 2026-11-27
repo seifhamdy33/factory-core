@@ -15,7 +15,8 @@ class Reinject(FactoryTest):
         ctx = self.build_ctx(spec="+++\nid = 7\n+++\n## Goal\nSPEC-BODY\n")
         out = self.start(ctx, "startup")
         self.assertEqual(out.splitlines(), [ri.CORE_LINE, NOTE,
-                                            "Factory session: phase build, issue #7, spec .factory/work/7/spec.md."])
+                                            "Factory session: phase build, issue #7, spec .factory/work/7/spec.md, "
+                                            "notes .factory/work/7/progress.md."])
         rec = self.log_lines()[0]
         self.assertEqual((rec["hook"], rec["decision"], rec["phase"], rec["session_id"]), ("reinject", "startup", "build", "s1"))
         self.assertEqual(rec["plugin_root"], str((CORE / "plugins" / "factory").resolve()))  # SP1: which copy ran
@@ -33,6 +34,15 @@ class Reinject(FactoryTest):
             out = self.start(ctx, src)
             self.assertIn("SPEC-BODY", out)
             self.assertIn("--- .factory/work/7/progress.md ---\n## Done\nPROGRESS-BODY", out)
+
+    def test_UserNotesGetAPointerOnly(self):  # D23: the user's own hooks reload their own notes file
+        self.user_config('[session]\nnotes = ".claude-work/TASKS.md"\n')
+        ctx = self.build_ctx(spec="+++\nid = 7\n+++\n## Goal\nSPEC-BODY\n")
+        write(ctx["root"] / ".claude-work" / "TASKS.md", "TASKS-BODY\n")
+        out = self.start(ctx, "compact")
+        self.assertIn("SPEC-BODY", out)
+        self.assertIn(", notes .claude-work/TASKS.md.", out)
+        self.assertNotIn("TASKS-BODY", out)
 
     def test_UnderTenThousandChars(self):
         ctx = self.build_ctx(spec="+++\nid = 7\n+++\n## Goal\nSPEC-START\n" + "s" * 30000 + "\nSPEC-END\n")

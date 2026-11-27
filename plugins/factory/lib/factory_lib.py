@@ -17,8 +17,9 @@ DEFAULTS = {
     "packet": {"max_lines": 40, "extra": [], "headings": dict(zip(PACKET_KEYS, (
         "## Intent", "## Acceptance checks", "## What changed", "## Needs you", "## Not verified", "## Rollback")))},
 }
-USER_DEFAULTS = {"verify_slots": 2, "lock_wait_s": 300, "session": {"build_note": ""}}
+USER_DEFAULTS = {"verify_slots": 2, "lock_wait_s": 300, "session": {"build_note": "", "notes": ".factory/work/{issue}/progress.md"}}
 GATE_FILES = [".claude/**", ".factory/**", ".github/**", "CLAUDE.md", "**/CLAUDE.md", "**/CODEOWNERS"]
+BLOCKER = re.compile(r"^## Block(?:er|ed)\b[^\n]*$(.*?)(?=^## |\Z)", re.M | re.S)  # the owner's `## Blocked` too
 VERIFY_LINE = re.compile(r"^factory-verify: (\S+) (PASS|FAIL) (\d+(?:\.\d+)?)s\s*$", re.M)
 NT = os.name == "nt"
 
@@ -70,6 +71,9 @@ def repo_ctx(cwd):
     work = root / ".factory" / "work" / issue if issue else None
     return {"root": root, "branch": branch, "repo": m.group(1) if m else None, "cfg": cfg, "issue": issue,
             "work": work, "state": load_json(work / "state.json", {}) if work else {}}
+
+def notes_path(ctx):  # the session's handoff notes: the user's `[session] notes` file, else progress.md in the work dir
+    return ctx["root"] / user_cfg()["session"]["notes"].format(issue=ctx["issue"])
 
 def save_state(ctx, **updates):
     ctx["state"].update(updates)

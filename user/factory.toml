@@ -5,3 +5,4 @@ lock_wait_s = 300       # wait at most this long for verify locks, then block wi
 
 [session]
 build_note = "This is delegating mode: a spec exists; work to the finish line."
+# notes = ".factory/work/{issue}/progress.md"   # your handoff file, per worktree, e.g. ".claude-work/TASKS.md"

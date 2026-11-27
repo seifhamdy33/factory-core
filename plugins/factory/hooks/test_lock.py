@@ -8,10 +8,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 import factory_lib as fl  # noqa: E402
 
 MSG = ("Acceptance tests are locked ({path} matches {glob}). If you believe a test is wrong, write it under "
-       "`## Spec issues` in progress.md and stop.")
+       "`## Spec issues` in {notes} and stop.")
 
 def locked_globs(ctx):
-    """-> (locked globs, spec scope). progress.md and packet.md stay editable."""
+    """-> (locked globs, spec scope). The notes file and packet.md stay editable."""
     w, st = f".factory/work/{ctx['issue']}", ctx["state"]
     spec_path = st.get("spec_path") or f"{w}/spec.md"
     meta = fl.load_spec(ctx["root"] / spec_path)[0] if (ctx["root"] / spec_path).is_file() else {}
@@ -43,7 +43,7 @@ def run(data, box):
             return 0, ""
     fl.log("test_lock", ctx, session_id=data.get("session_id"), decision="deny", reason=hit, path=shown,
            tool=data.get("tool_name"))
-    return 2, MSG.format(path=shown, glob=hit)
+    return 2, MSG.format(path=shown, glob=hit, notes=fl.notes_path(ctx).name)
 
 def handle(raw):
     box = {}
