@@ -22,7 +22,7 @@ def locked_globs(ctx):
 def run(data, box):
     cwd = data.get("cwd") or os.getcwd()
     ctx = fl.repo_ctx(cwd)
-    if not ctx or not ctx["cfg"] or not ctx["work"] or fl.phase(ctx) != "build":
+    if not ctx or not ctx["work"] or fl.phase(ctx) != "build":
         return 0, ""
     box["ctx"] = ctx
     ti = data.get("tool_input") or {}

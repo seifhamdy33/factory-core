@@ -1,7 +1,7 @@
 import json, os, unittest
 from unittest import mock
 
-from tests.helpers import FactoryTest, fl, load_hook, run_script, write
+from tests.helpers import FactoryTest, fl, git, load_hook, run_script, write
 
 sv = load_hook("stop_verify")
 RED = '#!/bin/sh\necho "factory-verify: lint PASS 1s"\necho "AssertionError: expected 2"\n' \
@@ -165,12 +165,15 @@ class StopVerify(FactoryTest):
         self.assertEqual(self.stop(ctx), (0, ""))
         self.assertEqual(self.log_lines(), [])
 
-    def test_NoConfigNoop(self):
+    def test_NotAFactoryRepoNoop(self):  # not on GitHub and no overlay; a github.com repo needs no overlay (D23)
         os.environ["FACTORY_PHASE"] = "build"
-        ctx = fl.repo_ctx(self.repo(cfg=None, verify=RED))
-        self.assertEqual(self.stop(ctx), (0, ""))
+        root = self.repo(cfg=None, verify=RED)
+        git(root, "remote", "set-url", "origin", "https://gitlab.example/o/r.git")
+        self.assertEqual(sv.handle(f'{{"cwd": "{root.as_posix()}"}}'), (0, ""))
         self.assertEqual(self.log_lines(), [])
-        self.assertFalse((ctx["root"] / ".factory" / "work").exists())
+        self.assertFalse((root / ".factory" / "work").exists())
+        git(root, "remote", "set-url", "origin", "git@github.com:o/r.git")
+        self.assertEqual(sv.handle(f'{{"cwd": "{root.as_posix()}"}}')[0], 2)  # no overlay: the build's verify still runs
 
     def test_ScriptEndToEnd(self):
         ctx = self.build_ctx(verify=RED)

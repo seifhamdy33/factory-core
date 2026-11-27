@@ -39,7 +39,7 @@ def strike(ctx, sig):
 
 def run(data, box):
     ctx = fl.repo_ctx(data.get("cwd") or os.getcwd())
-    if not ctx or not ctx["cfg"] or not ctx["work"] or fl.phase(ctx) != "build":
+    if not ctx or not ctx["work"] or fl.phase(ctx) != "build":
         return 0, ""
     box["ctx"] = ctx
     sid, consumed = data.get("session_id"), (ctx["state"].get("stop") or {}).get("blocker_consumed")

@@ -1,6 +1,6 @@
-# .factory/config.toml: the factory overlay for this repo (factory-core spec: Overlay contract).
+# .factory/config.toml: the optional factory overlay for this repo (factory-core spec: Overlay contract).
 # Set only what differs from the core defaults shown in the comments. This file is a gate file (always T3).
-project = "<repo-name>"                       # required
+project = "<repo-name>"                       # default: the GitHub repo name
 
 # tests = ["tests/**", "test/**", "**/test_*.py", "**/*_test.py", "**/*.test.*", "**/*.spec.*"]
 # acceptance_glob = "tests/acceptance/test_{issue}_*"
@@ -23,13 +23,17 @@ project = "<repo-name>"                       # required
 # docs_globs = ["docs/**", "**/*.md"]
 # sensitive = []                              # paths that make a change T3
 # gate_extra = []                             # extra gate files (always T3)
+# deps = []                                   # extra dependency manifests (T2), added to the core list in ci/tier.py
 
 [integrity]
 # threshold_globs = ["**/jest.config.*", "**/vitest.config.*", "**/.eslintrc*", "**/eslint.config.*",
 #                    "**/tsconfig*.json", "**/.coveragerc", "**/.nycrc*"]
+# assert = []                                 # extra regexes, added to the core lists in ci/integrity.py: removed
+# skip = []                                   #   assertions, added skips and added suppressions in test files raise
+# suppress = []                               #   to T2, e.g. assert = ['\bt\.(?:Error|Fatal)f?\(']  (Go)
 
 [authority]
-approver = ""                                 # the GitHub login whose spec-approved label counts (T2+)
+approver = ""                                 # the GitHub login whose spec-approved label counts (declared T3)
 
 [packet]
 # max_lines = 40

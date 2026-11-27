@@ -298,9 +298,13 @@ class Flows(FactoryTest):
             pins.append({"pin": {"pr": 12, "spec": "docs/specs/s.md", "blob": "old", "by": "boss"}})
             self.assertFalse(fx.pin_ok(ctx, 12, "docs/specs/s.md"))
 
+    def remote_head(self, main, branch="main"):  # as `git clone` leaves it: origin/HEAD -> the default branch
+        git(main, "update-ref", f"refs/remotes/origin/{branch}", "HEAD")
+        git(main, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{branch}")
+
     def test_ShapeCreatesWorktreeAndState(self):
         main = self.main_repo()
-        git(main, "update-ref", "refs/remotes/origin/main", "main")
+        self.remote_head(main)
         fake = FakeRun({"gh issue view": {"title": "Add the Thing!", "labels": [{"name": "tier:T2"}],
                                           "body": "Intent.\nParent: o/ws#1\n"}})
         code, _, err, launch = self.fx_in(main, fake, "shape", "7")
@@ -319,7 +323,7 @@ class Flows(FactoryTest):
 
     def test_ShapeRunsSetupOncePerWorktree(self):
         main = self.main_repo(cfg='project = "demo"\nsetup = ["fx-setup-probe", "--frozen"]\n')
-        git(main, "update-ref", "refs/remotes/origin/main", "main")
+        self.remote_head(main)
         fake = FakeRun({"gh issue view": {"title": "Add the Thing", "labels": [], "body": ""}})
         code, out, err, launch = self.fx_in(main, fake, "shape", "7")
         self.assertEqual(code, 0, err)
@@ -334,11 +338,43 @@ class Flows(FactoryTest):
 
     def test_ShapeSetupAcceptsOneString(self):
         main = self.main_repo(cfg='project = "demo"\nsetup = "fx-setup-probe --frozen"\n')
-        git(main, "update-ref", "refs/remotes/origin/main", "main")
+        self.remote_head(main)
         fake = FakeRun({"gh issue view": {"title": "Add the Thing", "labels": [], "body": ""}})
         code, _, err, _ = self.fx_in(main, fake, "shape", "7")
         self.assertEqual(code, 0, err)
         self.assertEqual([c for c in fake.calls if c[0] == "fx-setup-probe"], [["fx-setup-probe", "--frozen"]])
+
+    def test_ShapeNoOverlayMasterDefault(self):  # D23: no overlay, a `master` default branch, no gitignore entry
+        main = self.tmp / "plain"
+        main.mkdir()
+        git(main, "init", "-q", "-b", "master")
+        write(main / "app.py", "x = 1\n")
+        git(main, "add", "-A")
+        git(main, "commit", "-q", "-m", "init")
+        git(main, "remote", "add", "origin", "git@github.com:o/plain.git")
+        self.remote_head(main, "master")
+        git(main, "commit", "-q", "--allow-empty", "-m", "local work")  # the worktree starts from origin/HEAD, not HEAD
+        fake = FakeRun({"gh issue view": {"title": "Add thing", "labels": [{"name": "tier:T1"}], "body": ""}})
+        code, _, err, _ = self.fx_in(main, fake, "shape", "7")
+        self.assertEqual(code, 0, err)
+        wt = (main / ".." / "plain-worktrees").resolve() / "7-add-thing"
+        self.assertEqual(fl.git(wt, "rev-parse", "HEAD"), fl.git(main, "rev-parse", "origin/master"))
+        self.assertTrue((wt / ".factory" / "work" / "7" / "state.json").is_file())
+        self.assertEqual(fl.git(wt, "status", "--porcelain"), "")  # the work dir is ignored through info/exclude
+        code, _, err, _ = self.fx_in(main, fake, "shape", "7")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((main / ".git" / "info" / "exclude").read_text("utf-8").count(".factory/work/"), 1)
+        self.assertTrue((main / ".git" / "info" / "exclude").read_bytes().endswith(b"\n.factory/work/\n"))  # LF
+
+    def test_ShapeRefusesEmptyRepo(self):
+        main = self.main_repo()  # no origin/HEAD, and set-head --auto finds none (the remote has no commits)
+        real = fl.git
+        with mock.patch.object(fl, "git", side_effect=lambda cwd, *a: None if a[:2] == ("remote", "set-head") else real(cwd, *a)):
+            code, _, err, launch = self.fx_in(main, FakeRun({"gh issue view": {"title": "t", "labels": [], "body": ""}}),
+                                              "shape", "7")
+        self.assertEqual(code, 1)
+        self.assertIn("o/r has no default branch yet (an empty repo)\nNext: push a first commit, then fx shape 7", err)
+        launch.assert_not_called()
 
     def test_CleanNeedsMerged(self):
         main, wt, ctx = self.worktree(pr="https://github.com/o/r/pull/12")

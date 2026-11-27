@@ -4,6 +4,8 @@ import argparse, json, os, re, shlex, shutil, subprocess, sys
 from pathlib import Path
 
 CORE = Path(__file__).resolve().parents[1]
+if sys.version_info < (3, 11):
+    sys.exit(f"fx: needs Python 3.11 or newer (this is {sys.version.split()[0]}).\nNext: run fx with Python 3.11+")
 sys.path[:0] = [str(CORE / "plugins" / "factory" / "lib"), str(CORE / "ci")]
 import factory_lib as fl  # noqa: E402
 import gates, tier  # noqa: E402
@@ -51,9 +53,8 @@ def resolve(ref, cwd="."):  # <n> = the current git root's repo; <key>#<n> = [wo
         if not r:
             refuse(f"no [workspace] repos.{key} in {ctx['root']}", "run fx from the workspace root, or pass <n> inside the repo")
         ctx = fl.repo_ctx(ctx["root"] / r["path"])
-    if not ctx or not ctx["cfg"] or not ctx["repo"]:
-        refuse(f"{Path(cwd).resolve()} is not a factory repo (needs .factory/config.toml and a github.com origin)",
-               "cd into the repo or the workspace root, or add the overlay")
+    if not ctx or not ctx["repo"]:
+        refuse(f"{Path(cwd).resolve()} is not a factory repo (needs a github.com origin)", "cd into the repo or the workspace root")
     return ctx, n, key
 
 def main_root(root):
@@ -109,11 +110,20 @@ def cmd_shape(a):
         return launch(ctx["root"], f"/factory:shape {a.ref}", "shape")  # a workspace parent: no worktree
     main = main_root(ctx["root"])
     run(["git", "fetch", "origin"], main)
+    if not fl.git(main, "rev-parse", "--verify", "--quiet", "origin/HEAD"):  # the default branch, not a hard-coded main
+        fl.git(main, "remote", "set-head", "origin", "--auto")
+        if not fl.git(main, "rev-parse", "--verify", "--quiet", "origin/HEAD"):
+            refuse(f"{repo} has no default branch yet (an empty repo)", f"push a first commit, then fx shape {a.ref}")
+    if fl.git(main, "check-ignore", "-q", ".factory/work/x") is None:  # no gitignore covers the work dir
+        ex = Path(fl.git(main, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "info" / "exclude"
+        ex.parent.mkdir(exist_ok=True)
+        with open(ex, "a", encoding="utf-8", newline="") as f:  # LF, as git writes it
+            f.write("\n.factory/work/\n")
     branch, wname = names(cfg, n, iss["title"], iss["labels"])
     wt = worktrees(ctx).get(n) or (main / cfg["worktree_root"].format(project=cfg["project"])).resolve() / wname
     if not wt.exists():
         has = fl.git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
-        run(["git", "worktree", "add", wt, branch] if has else ["git", "worktree", "add", "-b", branch, wt, "origin/main"], main)
+        run(["git", "worktree", "add", wt, branch] if has else ["git", "worktree", "add", "-b", branch, wt, "origin/HEAD"], main)
     m, w = re.search(r"^Parent: (\S+#\d+)\s*$", iss.get("body") or "", re.M), fl.repo_ctx(wt)
     fl.save_state(w, issue=n, repo=repo, branch=branch, worktree=str(wt), parent=m and m.group(1),
                   phase="shape", tier=label_tier(iss["labels"]))
@@ -158,7 +168,7 @@ def cmd_build(a):
 def cmd_verify(a):
     ctx = fl.repo_ctx(".")
     if not ctx or not ctx["cfg"]:
-        refuse("not in a factory repo (no .factory/config.toml)", "cd into a factory worktree")
+        refuse("not in a github.com repo or a repo with .factory/config.toml", "cd into a factory worktree")
     res = fl.run_verify(ctx, "full" if a.full else "fast")
     print("\n".join(res["lines"] + ([] if res["ok"] else [res["tail"]])))
     state = "ok" if res["ok"] else f"FAIL ({res['reason']}: {', '.join(res['failed'])})"
@@ -232,7 +242,7 @@ def cmd_clean(a):
 def collect(cwd="."):  # [{key, cfg, repo, wts: {issue: {path, state}}, prs}] in workspace order
     ctx = fl.repo_ctx(cwd)
     if not ctx or not ctx["cfg"]:
-        refuse("not in a factory repo or workspace (no .factory/config.toml)", "cd into one")
+        refuse("not in a github.com repo, or a workspace with .factory/config.toml", "cd into one")
     ws = ctx["cfg"].get("workspace")
     out = []
     for k in (ws.get("order") or list(ws["repos"])) if ws else [None]:

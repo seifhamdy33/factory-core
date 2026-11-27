@@ -39,6 +39,11 @@ class Tier(unittest.TestCase):
                 self.assertEqual(t, 2)
                 self.assertIn("dependency manifest", reasons[0])
 
+    def test_OverlayDepsAreAdded(self):
+        cfg = fl.load_cfg_text('[tiers]\ndeps = ["**/Package.swift"]\n')
+        self.assertEqual(tier.compute([f("app/Package.swift")], cfg)[0], 2)
+        self.assertEqual(tier.compute([f("go.mod")], cfg)[0], 2)  # the core list still applies
+
     def test_SizeIsInformationOnly(self):  # D23: a big change stays at its risk tier
         t, reasons = tier.compute([f("src/a.py", 250, 50), f("docs/big.md", 500)], CFG)  # docs lines don't count
         self.assertEqual((t, reasons[0]), (1, "computed T1: 2 files, 300 code lines"))

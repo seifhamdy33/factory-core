@@ -15,9 +15,10 @@ import factory_lib as fl  # noqa: E402
 from tier import names, tier_num  # noqa: E402
 
 Flag = collections.namedtuple("Flag", "code kind msg")  # kind: "fail" | "raise:T2" | "raise:T3"
-ASSERT = re.compile(r"\bassert\b|\bself\.assert\w*|\bpytest\.raises\b|\bexpect\(")
-SKIP = re.compile(r"@pytest\.mark\.skip|\bxfail\b|\.skip\(|\.only\(|\btest\.todo\b")
-SUPPRESS = re.compile(r"#\s*type:\s*ignore|@ts-ignore|@ts-expect-error|eslint-disable|#\s*noqa")
+# Stacks as data (D23): an overlay's [integrity] assert/skip/suppress lists are added to these, never replace them.
+ASSERT = [r"\bassert\b", r"\bself\.assert\w*", r"\bpytest\.raises\b", r"\bexpect\("]
+SKIP = [r"@pytest\.mark\.skip", r"\bxfail\b", r"\.skip\(", r"\.only\(", r"\btest\.todo\b"]
+SUPPRESS = [r"#\s*type:\s*ignore", r"@ts-ignore", r"@ts-expect-error", r"eslint-disable", r"#\s*noqa"]
 LABEL, PIN_EVENT, PIN_PATH = "spec-approved", "pull_request_target", ".github/workflows/factory.yml"
 
 def short(items, n=5):
@@ -41,8 +42,12 @@ def i1_locked(spec, events):
     return [Flag("I1", "fail", f"locked files changed after spec_commit: {short(hits)}. "
                                "Next: revert them; if a test is wrong, write it under ## Spec issues")] * bool(hits) + cut
 
+def patterns(cfg, key, base):
+    return re.compile("|".join(f"(?:{p})" for p in [*base, *cfg["integrity"].get(key, [])]))
+
 def i2_test_edits(pr, cfg):
     out, nopatch, gone, skips, sups = [], [], [], [], []
+    a, sk, su = patterns(cfg, "assert", ASSERT), patterns(cfg, "skip", SKIP), patterns(cfg, "suppress", SUPPRESS)
     if pr.get("files_truncated"):
         out.append(Flag("I2", "raise:T2", "more PR files than the API lists: patch unavailable"))
     for f in pr.get("files", []):
@@ -53,9 +58,9 @@ def i2_test_edits(pr, cfg):
             nopatch.append(n)
             continue
         added, removed = collections.Counter(diff_lines(f["patch"], "+")), collections.Counter(diff_lines(f["patch"], "-"))
-        gone += [f"{n}: {ln}" for ln in removed - added if ASSERT.search(ln)]  # moved lines cancel out
-        skips += [f"{n}: {ln}" for ln in added - removed if SKIP.search(ln)]
-        sups += [f"{n}: {ln}" for ln in added - removed if SUPPRESS.search(ln)]
+        gone += [f"{n}: {ln}" for ln in removed - added if a.search(ln)]  # moved lines cancel out
+        skips += [f"{n}: {ln}" for ln in added - removed if sk.search(ln)]
+        sups += [f"{n}: {ln}" for ln in added - removed if su.search(ln)]
     for items, what in ((nopatch, "patch unavailable"), (gone, "removed assertions"), (skips, "added skip/only/todo"),
                         (sups, "added suppressions")):
         if items:

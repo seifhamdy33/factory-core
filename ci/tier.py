@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "factory" / "lib"))
 import factory_lib as fl  # noqa: E402
 
-# Phase 1 stand-in for deps.py: any lockfile or manifest change is T2.
+# Phase 1 stand-in for deps.py: any lockfile or manifest change is T2. An overlay's [tiers] deps globs are added.
 DEP_GLOBS = ["**/" + n for n in (
     "package.json", "package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb",
     "pyproject.toml", "poetry.lock", "uv.lock", "Pipfile", "Pipfile.lock", "requirements*.txt", "setup.py", "setup.cfg",
@@ -36,7 +36,7 @@ def compute(files, cfg, flags=(), declared=None):
                 cands.append((3, f"gate file {n} ({g})"))
             if s := fl.any_match(t["sensitive"], n):
                 cands.append((3, f"sensitive path {n} ({s})"))
-            if d := fl.any_match(DEP_GLOBS, n):
+            if d := fl.any_match([*DEP_GLOBS, *t.get("deps", [])], n):
                 cands.append((2, f"dependency manifest {n} changed ({d})"))
     for flag in flags:
         if flag.kind.startswith("raise:T"):
