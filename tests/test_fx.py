@@ -76,7 +76,7 @@ class Pure(FactoryTest):
 
     def test_RefRefusals(self):
         root = self.repo()
-        with mock.patch.object(fx.os, "getcwd", return_value=str(root)), contextlib.chdir(root):
+        with contextlib.chdir(root), mock.patch.object(fx.os, "getcwd", return_value=str(root)):  # chdir first: it saves the real cwd
             code, _, err = call("shape", "seven")
             self.assertIn("bad ref 'seven'\nNext: use <n>", err)
             code, _, err = call("shape", "api#7")
