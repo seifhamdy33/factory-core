@@ -37,10 +37,10 @@ flowchart LR
 ```
 
 1. **Intake.** `/factory:idea <text>` creates an issue with a 1–3 line intent and a `tier:T<n>` label.
-2. **Shape.** `fx shape <n>` creates a branch and worktree and runs the repo's `setup` command once. Then it starts Claude (Opus, high effort) on `/factory:shape <n>`, which writes the acceptance tests and runs the **red check**: each test must fail, for the stated reason, before any code exists. The tests are committed alone, and that commit becomes `spec_commit`.
+2. **Shape.** `fx shape <n>` creates a branch and worktree and runs the repo's `setup` command once. Then it starts a background Claude session (`claude --bg`, your own model and settings) on `/factory:shape <n>` and returns; `claude attach <id>` watches it. The session writes the acceptance tests and runs the **red check**: each test must fail, for the stated reason, before any code exists. The tests are committed alone, and that commit becomes `spec_commit`.
    - **T1:** a short spec goes into the issue body.
    - **T2/T3:** after an interview with you, a spec file is committed on the branch and a draft PR is opened. You approve it by adding the `spec-approved` label.
-3. **Build.** `fx build <n>` starts a **fresh** session, with the model chosen by tier. Claude implements the spec while three hooks keep it honest:
+3. **Build.** `fx build <n>` starts a **fresh** background session. Claude implements the spec while three hooks keep it honest:
    - it can't end its turn while `verify --fast` is red;
    - it can't edit the locked tests;
    - it gets the spec back after compaction.
@@ -291,7 +291,8 @@ Sections: Goal, Non-goals, Behavior, Acceptance checks (each with a runnable com
 - **A plain `claude` session in a build worktree is still gated.** The hooks read the phase from `state.json`, so the Stop gate applies there too.
 - **Claude Code caps consecutive Stop blocks** (8 by default, `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`). A session that hits the cap ends while still red. `ledger.py audit` counts these as `ended_by_cap_or_interrupt`.
 - **Use `/factory:ship`, not `/ship`.** The built-in `/ship` produces no evidence packet and skips `fx ship`'s checks.
-- **New worktrees show a trust prompt.** The first `claude` start in a new worktree asks you to trust the folder; accept it once.
+- **The repo must be trusted once.** `claude --bg` refuses an untrusted folder. A worktree of a repo you trusted is trusted, so run `claude` once in the main checkout and accept the prompt.
+- **A finished session stays idle until it is stopped.** On Windows it also holds the worktree folder. `fx clean` stops the sessions fx started; `claude agents` lists them.
 - **The first overlay PR runs no gates.** The workflow runs from the base branch, so there's nothing to run until it's merged. Review that PR by hand.
 - **Labels must exist.** Create them in each repo before using `/factory:idea` or the approval label.
 - **Keep `verify --fast` offline.** It must not read env files or need network or cloud access. CI still runs those checks.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """fx: the factory CLI (spec: Design > fx). Every refusal prints its cause and one "Next:" line (D10)."""
-import argparse, json, os, re, shlex, shutil, subprocess, sys
+import argparse, json, os, re, shlex, shutil, subprocess, sys, time
 from pathlib import Path
 
 CORE = Path(__file__).resolve().parents[1]
@@ -86,9 +86,15 @@ def open_pr(w):
     prs = gh_json("pr", "list", "-R", w["repo"], "--head", w["branch"], "--state", "open", "--json", "number,url")
     return (prs or [None])[0]
 
-def launch(cwd, prompt, phase):  # the user's own model, effort and settings: fx passes no flags (D23)
-    print(f"Launching claude in {cwd}. A new worktree shows the trust prompt once: accept it.")
-    return subprocess.call([shutil.which("claude") or "claude", prompt], cwd=cwd, env=os.environ | {"FACTORY_PHASE": phase})
+def launch(w, prompt, phase):  # returns at once: a background session, the user's own model and settings (D23)
+    p = subprocess.run([shutil.which("claude") or "claude", "--bg", prompt], cwd=w["root"], capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", env=os.environ | {"FACTORY_PHASE": phase})
+    sid = re.search(r"backgrounded\W+(\w+)", p.stdout) or refuse(
+        f"claude --bg did not start: {(p.stderr or p.stdout).strip()[-600:]}", f"fix the cause above, then rerun fx {phase}")
+    if w["work"]:  # fx clean stops them: an idle session holds its folder on Windows
+        fl.save_state(w, sessions=[*w["state"].get("sessions", []), sid[1]])
+    print(f"Started the {phase} session in the background.\nWatch: claude attach {sid[1]}  (or claude logs {sid[1]})")
+    return 0
 
 def ledger(w, url):
     st = w["state"]
@@ -101,7 +107,7 @@ def cmd_shape(a):
     cfg, repo = ctx["cfg"], ctx["repo"]
     iss = gh_json("issue", "view", n, "-R", repo, "--json", "title,labels,body")
     if "workspace" in cfg and "factory:parent" in {lb["name"] for lb in iss["labels"]}:
-        return launch(ctx["root"], f"/factory:shape {a.ref}", "shape")  # a workspace parent: no worktree
+        return launch(ctx, f"/factory:shape {a.ref}", "shape")  # a workspace parent: no worktree
     main = main_root(ctx["root"])
     run(["git", "fetch", "origin"], main)
     if not fl.git(main, "rev-parse", "--verify", "--quiet", "origin/HEAD"):  # the default branch, not a hard-coded main
@@ -126,7 +132,7 @@ def cmd_shape(a):
         print(f"Setting up the worktree: {' '.join(cmd)}", flush=True)
         run([shutil.which(cmd[0]) or cmd[0], *cmd[1:]], wt)  # which: npm/pnpm are .cmd shims on Windows
         fl.save_state(w, setup_done=True)
-    return launch(wt, f"/factory:shape {n}", "shape")
+    return launch(w, f"/factory:shape {n}", "shape")
 
 def cmd_build(a):
     w, n, ref = worktree_ctx(a.ref)
@@ -147,7 +153,7 @@ def cmd_build(a):
     notes = fl.notes_path(w).relative_to(wt).as_posix()
     review = (" When fast verify passes, run `/code-review medium`, fix the findings you can demonstrate with a failing"
               " test, and list the rest under Needs you." if t >= 2 else "")
-    return launch(wt, f"Implement the spec in {spec_path}. Keep {notes} current. Run `fx verify --fast` and"
+    return launch(w, f"Implement the spec in {spec_path}. Keep {notes} current. Run `fx verify --fast` and"
                   f" `fx ship` with the Bash tool's run_in_background, and wait for their result.{review} Then write"
                   f" {rel}/packet.md from {CORE.as_posix()}/plugins/factory/templates/packet.md using this repo's"
                   f" [packet] headings, and run `fx ship {n}`.", "build")
@@ -212,6 +218,15 @@ def cmd_clean(a):
         if f.is_file():
             shutil.copy2(f, arch / f.name)
     main = main_root(w["root"])
+    os.chdir(main)  # Windows can't delete the folder fx runs in
+    claude, ids = shutil.which("claude") or "claude", set(w["state"].get("sessions", []))
+    for s in sorted(ids):  # idle background sessions; one already gone is fine
+        subprocess.run([claude, "stop", s], capture_output=True)
+    for _ in range(40 if ids else 0):  # stop returns before the session exits and frees the folder on Windows
+        out = subprocess.run([claude, "agents", "--json"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if not ids & {a.get("id") for a in json.loads(out.stdout or "[]")}:
+            break
+        time.sleep(0.5)
     run(["git", "worktree", "remove", w["root"]], main)  # refuses when the worktree has changes
     run(["git", "branch", "-D", w["branch"]], main)  # only because GitHub says the PR is merged
     print(f"Cleaned #{n}: archived to {arch}; removed {w['root']} and branch {w['branch']}.")

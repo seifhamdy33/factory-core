@@ -61,14 +61,6 @@ class Pure(FactoryTest):
         dflt = fl.load_cfg_text('project = "p"\n')
         self.assertEqual(fx.names(dflt, "7", "Add thing", []), ("f/7-add-thing", "7-add-thing"))
 
-    def test_LaunchPassesNoModelFlags(self):  # D23: the user's own model, effort and settings
-        with mock.patch.object(fx.subprocess, "call", return_value=0) as c, contextlib.redirect_stdout(io.StringIO()):
-            fx.launch(self.tmp, "/factory:shape 7", "shape")
-        self.assertEqual(c.call_args.args[0][1:], ["/factory:shape 7"])
-        env = c.call_args.kwargs["env"]
-        self.assertEqual(env["FACTORY_PHASE"], "shape")
-        self.assertNotIn("CLAUDE_CODE_USE_POWERSHELL_TOOL", set(env) - set(os.environ))
-
     def test_LabelTier(self):
         self.assertEqual(fx.label_tier([{"name": "tier:T0"}, {"name": "bug"}]), 0)
         self.assertEqual(fx.label_tier([{"name": "tier:T1"}, {"name": "tier:T3"}]), 3)
@@ -234,8 +226,8 @@ class Flows(FactoryTest):
         self.assertEqual((ctx["work"] / "spec.md").read_text("utf-8"), block + "\n")  # always rewritten from the issue
         st = fl.load_json(ctx["work"] / "state.json")
         self.assertEqual((st["phase"], st["tier"], st["spec_path"]), ("build", 1, ".factory/work/7/spec.md"))
-        cwd, prompt, phase = launch.call_args.args
-        self.assertEqual((Path(cwd), phase), (wt, "build"))
+        w, prompt, phase = launch.call_args.args
+        self.assertEqual((w["root"], phase), (wt, "build"))
         self.assertTrue(prompt.startswith("Implement the spec in .factory/work/7/spec.md. Keep .factory/work/7/progress.md"))
         self.assertNotIn("/code-review", prompt)
         for ch in '<>|&%"':
@@ -341,15 +333,43 @@ class Flows(FactoryTest):
         self.assertIn("o/r has no default branch yet (an empty repo)\nNext: push a first commit, then fx shape 7", err)
         launch.assert_not_called()
 
+    def test_LaunchStartsABackgroundSession(self):  # D23: no model flags; fx returns at once and records the session
+        main, wt, ctx = self.worktree()
+        ok = mock.Mock(returncode=0, stdout="backgrounded \u00b7 3ed22d67\n  claude agents  list sessions\n", stderr="")
+        with mock.patch.object(fx.subprocess, "run", return_value=ok) as r, contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(fx.launch(ctx, "/factory:shape 7", "shape"), 0)
+        self.assertEqual(r.call_args.args[0][1:], ["--bg", "/factory:shape 7"])
+        self.assertEqual(Path(r.call_args.kwargs["cwd"]), wt)
+        env = r.call_args.kwargs["env"]
+        self.assertEqual(env["FACTORY_PHASE"], "shape")
+        self.assertNotIn("CLAUDE_CODE_USE_POWERSHELL_TOOL", set(env) - set(os.environ))
+        self.assertIn("Watch: claude attach 3ed22d67", out.getvalue())
+        self.assertEqual(fl.load_json(ctx["work"] / "state.json")["sessions"], ["3ed22d67"])
+        bad = mock.Mock(returncode=1, stdout="", stderr="Workspace not trusted. Run `claude` in X once.")
+        ctx = fl.repo_ctx(wt)  # before the patch: repo_ctx runs git
+        with mock.patch.object(fx.subprocess, "run", return_value=bad), self.assertRaises(fx.Refused) as e:
+            fx.launch(ctx, "/factory:shape 7", "shape")
+        self.assertIn("claude --bg did not start: Workspace not trusted.", str(e.exception))
+        self.assertIn("Next: fix the cause above, then rerun fx shape", str(e.exception))
+
     def test_CleanNeedsMerged(self):
-        main, wt, ctx = self.worktree(pr="https://github.com/o/r/pull/12")
+        main, wt, ctx = self.worktree(pr="https://github.com/o/r/pull/12", sessions=["aa11", "bb22"])
         write(ctx["work"] / "progress.md", "notes\n")
         fake = FakeRun({"gh pr view": {"state": "OPEN", "url": "https://github.com/o/r/pull/12"}})
         code, _, err, _ = self.fx_in(main, fake, "clean", "7")
         self.assertIn("is open, not merged\nNext: the owner merges it, then fx clean 7", err)
         fake.gh["gh pr view"]["state"] = "MERGED"
-        code, out, err, _ = self.fx_in(main, fake, "clean", "7")
+        real, calls, listed = fx.subprocess.run, [], iter(['[{"id": "aa11"}, {"name": "other"}]', "[]"])
+        def run(cmd, *a, **k):  # claude calls are recorded (agents lists aa11 once, then nothing); git runs for real
+            if "claude" not in Path(cmd[0]).name.lower():
+                return real(cmd, *a, **k)
+            calls.append(cmd[1:])
+            return mock.Mock(stdout=next(listed) if cmd[1] == "agents" else "")
+        with mock.patch.object(fx.subprocess, "run", run), mock.patch.object(fx.time, "sleep") as nap:
+            code, out, err, _ = self.fx_in(wt, fake, "clean", "7")  # from inside the worktree
         self.assertEqual(code, 0, err)
+        self.assertEqual(calls, [["stop", "aa11"], ["stop", "bb22"], ["agents", "--json"], ["agents", "--json"]])
+        nap.assert_called_once()  # waited until the stopped sessions were gone
         self.assertFalse(wt.exists())
         self.assertIsNone(fl.git(main, "rev-parse", "--verify", "--quiet", "refs/heads/f/7-add-thing"))
         self.assertEqual((self.home / "archive" / "o" / "r" / "7" / "progress.md").read_text("utf-8"), "notes\n")
