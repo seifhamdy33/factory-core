@@ -155,12 +155,12 @@ def gates(api, env, ev, extra_pin=None, notes=()):
         except ValueError as e:
             notes.append(f"the issue's factory:spec block has invalid TOML frontmatter: {e}")
     sc = spec and spec["meta"].get("spec_commit")
-    events = {"tier": None, "issue": issue_n, "spec_blob": blob,
-              "compare": api.get(f"compare/{q(sc)}...{pr['head']['sha']}") if sc else None}
     labels = [lb["name"] for lb in (issue or {}).get("labels", []) if lb["name"].startswith("tier:")]
     declared = max([tier.tier_num(lb[5:]) or 0 for lb in labels] + [tier.tier_num(spec and spec["meta"].get("tier")) or 0])
+    events = {"tier": None, "declared": declared, "issue": issue_n, "spec_blob": blob,
+              "compare": api.get(f"compare/{q(sc)}...{pr['head']['sha']}") if sc else None}
     t, reasons = tier.compute(files, cfg, integrity.check(pr, spec, cfg, events), declared)
-    if t >= 2:
+    if declared >= 3:  # only I7 reads these (D23)
         events |= {"label_events": api.get_all(f"issues/{n}/events"),
                    "pins": collect_pins(api, [extra_pin] if extra_pin else [])}
     flags = integrity.check(pr, spec, cfg, events | {"tier": t})
