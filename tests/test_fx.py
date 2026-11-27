@@ -112,9 +112,11 @@ class Waiting(FactoryTest):
         blocked = self.wt("9", branch="f/9-b")
         write(blocked["path"] / ".factory" / "work" / "9" / "progress.md", "# p\n\n## Blocker\nneeds a key\n")
         r = repo_entry(None, [pr(1, "f/1-a", labels=["tier:T3"]), pr(2, "f/2-b", labels=["tier:T3", "spec-approved"]),
-                              pr(3, "f/3-c", labels=["tier:T2"]),  # T3 only: a T2 PR needs no approval label
+                              pr(3, "f/3-c", labels=["tier:T3"]),  # computed T3 only: no approval label (D23)
                               pr(6, "feature/not-factory"), pr(7, "f/7-m", state="MERGED")],
-                       {"8": self.wt("8", branch="f/8-a", ship="failed:unit,lint"), "9": blocked,
+                       {"1": self.wt("1", branch="f/1-a", tier=3), "2": self.wt("2", branch="f/2-b", tier=3),
+                        "3": self.wt("3", branch="f/3-c", tier=1),
+                        "8": self.wt("8", branch="f/8-a", ship="failed:unit,lint"), "9": blocked,
                         "7": self.wt("7", branch="f/7-m", pr="https://github.com/o/api/pull/7")})
         self.assertEqual(fx.waiting([r]), [
             "as the-approver, add `spec-approved`: https://github.com/o/api/pull/1",
@@ -230,7 +232,8 @@ class Flows(FactoryTest):
         self.assertEqual((w["root"], phase), (wt, "build"))
         self.assertTrue(prompt.startswith("Implement the spec in .factory/work/7/spec.md, unattended"))
         self.assertIn("Keep .factory/work/7/progress.md current", prompt)
-        self.assertIn("Run the reviews your setup requires for T1. Fix", prompt)  # no default review at T1
+        self.assertIn("Run the reviews your setup requires for T1, or for the PR's factory/tier once CI computes a"
+                      " higher one. If it names none: at T2 and up one independent review in a fresh context", prompt)
         self.assertIn("write a `## Blocker` section in .factory/work/7/progress.md", prompt)
         self.assertRegex("## Blocker\nq\n", fl.BLOCKER)  # the heading the prompt names is the one fx detects
         for ch in '<>|&%"':
@@ -238,9 +241,11 @@ class Flows(FactoryTest):
 
     def test_BuildT0WritesIntent(self):
         main, _, ctx = self.worktree(tier=0)
+        self.user_config(f'[session]\nnotes = "{(self.home / "notes.md").as_posix()}"\n')  # outside the worktree
         fake = FakeRun({"gh issue view": {"title": "Fix typo", "labels": [{"name": "tier:T0"}], "body": "In the README."}})
         code, _, err, launch = self.fx_in(main, fake, "build", "7")
         self.assertEqual(code, 0, err)
+        self.assertIn(f"Keep {self.home / 'notes.md'} current", launch.call_args.args[1])
         self.assertEqual((ctx["work"] / "intent.md").read_text("utf-8"), "# Fix typo\n\nIn the README.\n")
         self.assertEqual(fl.load_json(ctx["work"] / "state.json")["tier"], 0)
 
@@ -255,7 +260,7 @@ class Flows(FactoryTest):
         code, _, err, launch = self.fx_in(main, fake, "build", "7")
         self.assertEqual(code, 0, err)
         self.assertFalse(fake.has("gh", "pr", "list"))  # no pin lookup
-        self.assertIn("for T2; if it names none, one independent review in a fresh context", launch.call_args.args[1])
+        self.assertIn("requires for T2, or for the PR's factory/tier", launch.call_args.args[1])
         self.assertEqual(fl.load_json(ctx["work"] / "state.json")["tier"], 2)
 
     def remote_head(self, main, branch="main"):  # as `git clone` leaves it: origin/HEAD -> the default branch
@@ -346,7 +351,7 @@ class Flows(FactoryTest):
 
     def test_LaunchStartsABackgroundSession(self):  # D23: no model flags; fx returns at once and records the session
         main, wt, ctx = self.worktree()
-        ok = mock.Mock(returncode=0, stdout="backgrounded \u00b7 3ed22d67\n  claude agents  list sessions\n", stderr="")
+        ok = mock.Mock(returncode=0, stdout="backgrounded \u00b7 3ed22d67-a1b2\n  claude agents  list sessions\n", stderr="")
         with mock.patch.object(fx.subprocess, "run", return_value=ok) as r, contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(fx.launch(ctx, "/factory:shape 7", "shape"), 0)
         self.assertEqual(r.call_args.args[0][1:], ["--bg", "/factory:shape 7"])
@@ -354,8 +359,8 @@ class Flows(FactoryTest):
         env = r.call_args.kwargs["env"]
         self.assertEqual(env["FACTORY_PHASE"], "shape")
         self.assertNotIn("CLAUDE_CODE_USE_POWERSHELL_TOOL", set(env) - set(os.environ))
-        self.assertIn("Watch: claude attach 3ed22d67", out.getvalue())
-        self.assertEqual(fl.load_json(ctx["work"] / "state.json")["sessions"], ["3ed22d67"])
+        self.assertIn("Watch: claude attach 3ed22d67-a1b2", out.getvalue())  # ids may hold hyphens
+        self.assertEqual(fl.load_json(ctx["work"] / "state.json")["sessions"], ["3ed22d67-a1b2"])
         bad = mock.Mock(returncode=1, stdout="", stderr="Workspace not trusted. Run `claude` in X once.")
         ctx = fl.repo_ctx(wt)  # before the patch: repo_ctx runs git
         with mock.patch.object(fx.subprocess, "run", return_value=bad), self.assertRaises(fx.Refused) as e:
@@ -370,7 +375,7 @@ class Flows(FactoryTest):
         code, _, err, _ = self.fx_in(main, fake, "clean", "7")
         self.assertIn("is open, not merged\nNext: the owner merges it, then fx clean 7", err)
         fake.gh["gh pr view"]["state"] = "MERGED"
-        real, calls, listed = fx.subprocess.run, [], iter(['[{"id": "aa11"}, {"name": "other"}]', "[]"])
+        real, calls, listed = fx.subprocess.run, [], iter(['warning: not JSON\n[{"id": "aa11"}]', "{}"])
         def run(cmd, *a, **k):  # claude calls are recorded (agents lists aa11 once, then nothing); git runs for real
             if "claude" not in Path(cmd[0]).name.lower():
                 return real(cmd, *a, **k)

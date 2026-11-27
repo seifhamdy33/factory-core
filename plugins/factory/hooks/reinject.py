@@ -26,7 +26,8 @@ def run(data):
     spec_path = ctx["state"].get("spec_path") or f"{w}/spec.md"
     sess = fl.user_cfg()["session"]
     note, own = sess["build_note"] if ph == "build" else "", sess["notes"] != fl.USER_DEFAULTS["session"]["notes"]
-    notes = fl.notes_path(ctx).relative_to(ctx["root"]).as_posix() if issue else ""
+    p = fl.notes_path(ctx) if issue else None
+    notes = (p.relative_to(ctx["root"]).as_posix() if p.is_relative_to(ctx["root"]) else str(p)) if p else ""
     where = f", issue #{issue}, spec {spec_path}, notes {notes}" if issue else ""
     out = "\n".join(x for x in (CORE_LINE, note, f"Factory session: phase {ph}{where}.") if x)
     if src != "startup" and issue:

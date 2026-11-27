@@ -43,7 +43,7 @@ def run(data, box):
             return 0, ""
     fl.log("test_lock", ctx, session_id=data.get("session_id"), decision="deny", reason=hit, path=shown,
            tool=data.get("tool_name"))
-    return 2, MSG.format(path=shown, glob=hit, notes=fl.notes_path(ctx).name)
+    return 2, MSG.format(path=shown, glob=hit, notes=p.relative_to(ctx["root"]).as_posix() if (p := fl.notes_path(ctx)).is_relative_to(ctx["root"]) else str(p))
 
 def handle(raw):
     box = {}

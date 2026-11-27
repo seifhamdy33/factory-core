@@ -85,6 +85,7 @@ The CI workflow runs only on `pull_request_target`. The workflow and the overlay
 - Python ≥ 3.11 on PATH as `python3`, which the hooks call, and as `python`, which `fx.cmd` calls on Windows. On an older Python the hooks do nothing and `fx` refuses with a `Next:` line.
 - `git`, the GitHub CLI `gh` (authenticated, with access to the repos), and Claude Code with background sessions (`claude --bg`).
 - A POSIX `sh`. On Windows, Git for Windows provides it; `fx` falls back to `C:/Program Files/Git/bin/sh.exe`.
+- **macOS:** the system `python3` is 3.9, so install 3.11+ (for example `brew install python@3.12`) and put it first on PATH. **Linux:** use the distribution's Python 3.11+ package.
 
 **What factory-core assumes about your setup** (it checks none of these and changes none of them):
 - Unattended sessions need a permission mode that doesn't prompt, for example `auto`. A prompt in a background session waits until you attach.
@@ -182,7 +183,7 @@ The hooks do nothing outside factory sessions. They turn on only when `FACTORY_P
 | Flag | Effect | When |
 |---|---|---|
 | I1 | fail | Locked files changed after `spec_commit`, or `spec_commit` isn't in the PR's history |
-| I2 | raise to T2 | Test files: deleted assertions; new skip, only or todo markers; new suppressions (`noqa`, `ts-ignore`, `eslint-disable`, …); a patch GitHub doesn't show. The patterns are data: an overlay adds its stack's with `[integrity] assert`, `skip` and `suppress`. |
+| I2 | raise to T2 | Test files: deleted assertions; new skip, only or todo markers; new suppressions (`noqa`, `ts-ignore`, `eslint-disable`, …); a patch GitHub doesn't show. The patterns are data: an overlay adds its stack's with `[integrity] assert`, `skip` and `suppress` (see Add a stack). |
 | I3 | raise to T2 | Coverage or lint threshold config changed (`[integrity] threshold_globs`) |
 | I4 | raise to T2 | Files outside the spec's `scope` |
 | I5 | fail | A quarantined test is used as an acceptance check |
@@ -323,6 +324,7 @@ python metrics/ledger.py audit                 # or: summary
 - **No dependencies.** Hooks, gates and `fx` use the Python standard library only.
 - **Generic core.** Project specifics belong in overlays: core code must not name any project or account.
 - **Releases.** Bump `version` in `plugins/factory/.claude-plugin/plugin.json` on each core release. Installed copies keep the old files until the version changes.
+- **Add a stack.** Stack patterns are plain lists: `ASSERT`, `SKIP` and `SUPPRESS` in `ci/integrity.py`, and `DEP_GLOBS` in `ci/tier.py`. To support a stack in core, add its patterns there and a row to the table-driven test in `tests/test_integrity.py`. For one repo only, set `[integrity] assert`/`skip`/`suppress` and `[tiers] deps` in its overlay; those are added to the core lists, never replace them.
 - **Workflow pin.** Each overlay pins `ci/` by SHA, so a change under `ci/` reaches a repo only when that repo bumps its pin (a T3 change there).
 
 Design rationale lives in `FACTORY_BRIEF.md`. The plan, including the gap register, is in its section 5.

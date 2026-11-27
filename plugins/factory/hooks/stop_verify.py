@@ -9,7 +9,7 @@ import factory_lib as fl  # noqa: E402
 
 HOOK = "stop_verify"
 BLOCKER_ASK = ("Stop iterating. Add a `## Blocker` section to {notes}: what fails, what you tried, your best "
-               "hypothesis, what you need from the owner. Then end your turn.")
+               "hypothesis, what you need from the owner. Post the same text as an issue comment, then end your turn.")
 NEXT_FIX = "Next: fix and end your turn again, or add `## Blocker` to {notes} if you're stuck."
 NEXT = {
     "lock-timeout": "Next: end your turn; verify will retry.",

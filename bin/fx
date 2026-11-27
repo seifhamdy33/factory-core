@@ -89,7 +89,7 @@ def open_pr(w):
 def launch(w, prompt, phase):  # returns at once: a background session, the user's own model and settings (D23)
     p = subprocess.run([shutil.which("claude") or "claude", "--bg", prompt], cwd=w["root"], capture_output=True, text=True,
                        encoding="utf-8", errors="replace", env=os.environ | {"FACTORY_PHASE": phase})
-    sid = re.search(r"backgrounded\W+(\w+)", p.stdout) or refuse(
+    sid = re.search(r"backgrounded\W+([\w-]+)", p.stdout) or refuse(
         f"claude --bg did not start: {(p.stderr or p.stdout).strip()[-600:]}", f"fix the cause above, then rerun fx {phase}")
     if w["work"]:  # fx clean stops them: an idle session holds its folder on Windows
         fl.save_state(w, sessions=[*w["state"].get("sessions", []), sid[1]])
@@ -150,16 +150,16 @@ def cmd_build(a):
         spec_path = f"{rel}/intent.md"
         (wt / spec_path).write_text(f"# {iss['title']}\n\n{(iss['body'] or '').strip()}\n", "utf-8")
     fl.save_state(w, phase="build", tier=t, spec_path=spec_path)
-    notes = fl.notes_path(w).relative_to(wt).as_posix()
-    review = {2: "; if it names none, one independent review in a fresh context given only the spec and the diff",
-              3: "; if it names none, that review plus a security review"}.get(t, "")  # A5: the user's rules win
+    notes = p.relative_to(wt).as_posix() if (p := fl.notes_path(w)).is_relative_to(wt) else str(p)  # a user path may sit outside
     return launch(w, f"Implement the spec in {spec_path}, unattended: nobody is watching. Keep {notes} current. Run"
                   " `fx verify --fast` and `fx ship` with the Bash tool's run_in_background, and wait for their result."
                   " Show the change working the way your setup says, end to end where it is user-facing. Run the reviews"
-                  f" your setup requires for T{t}{review}. Fix the findings you can demonstrate with a failing test and"
+                  f" your setup requires for T{t}, or for the PR's factory/tier once CI computes a higher one. If it names"
+                  " none: at T2 and up one independent review in a fresh context given only the spec and the diff, at T3"
+                  " also a security review. Fix the findings you can demonstrate with a failing test and"
                   f" list the rest under Needs you. Then write {rel}/packet.md from {CORE.as_posix()}/plugins/factory/"
                   f"templates/packet.md using this repo's [packet] headings, with what you exercised, and run `fx ship {n}`."
-                  f" Then make the PR's checks pass; if its factory/tier is above T{t}, run that tier's reviews too. When"
+                  " Then make the PR's checks pass. When"
                   " a failure repeats past your setup's limit (3 if none), or the next step is irreversible or needs the"
                   f" owner, write a `## Blocker` section in {notes} with the question, post it as an issue comment, and stop.",
                   "build")
@@ -233,7 +233,7 @@ def clean(w, n, url):  # archive the notes and packet, stop the sessions, remove
         subprocess.run([claude, "stop", s], capture_output=True)
     for _ in range(40 if ids else 0):  # stop returns before the session exits and frees the folder on Windows
         out = subprocess.run([claude, "agents", "--json"], capture_output=True, text=True, encoding="utf-8", errors="replace")
-        if not ids & {a.get("id") for a in json.loads(out.stdout or "[]")}:
+        if not any(s in out.stdout for s in ids):  # plain text match: survives warnings or a changed JSON shape
             break
         time.sleep(0.5)
     run(["git", "worktree", "remove", w["root"]], main)  # refuses when the worktree has changes
@@ -278,10 +278,10 @@ def waiting(repos):  # the "Waiting on you" list; approver and order come from c
         for p in r["prs"]:
             if p["state"] != "OPEN" or not fl.parse_issue(r["cfg"]["branch"], p["headRefName"]):
                 continue
-            if "tier:T3" in (labels := {lb["name"] for lb in p["labels"]}) and LABEL not in labels:  # T3: approval at the PR
+            if (st := by_head.get(p["headRefName"]) or {}).get("tier") == 3 and LABEL not in {lb["name"] for lb in p["labels"]}:  # I7: a declared T3
                 out.append(f"as {who}, add `{LABEL}`: {p['url']}")
                 continue
-            par = (by_head.get(p["headRefName"]) or {}).get("parent")
+            par = st.get("parent")
             dep = r is not first and par and next((w["state"]["pr"] for w in first["wts"].values()
                                                    if w["state"].get("parent") == par and w["state"].get("pr") in first_open), None)
             out.append(f"merge {first['key']} PR {dep} first: {p['url']}" if dep else f"review/merge: {p['url']}")
