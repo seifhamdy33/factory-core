@@ -107,7 +107,7 @@ def cmd_shape(a):
     cfg, repo = ctx["cfg"], ctx["repo"]
     iss = gh_json("issue", "view", n, "-R", repo, "--json", "title,labels,body")
     if "workspace" in cfg and "factory:parent" in {lb["name"] for lb in iss["labels"]}:
-        return launch(ctx, f"/factory:shape {a.ref}", "shape")  # a workspace parent: no worktree
+        refuse(f"#{n} is a workspace parent: /factory:idea split it into slices", "fx shape <key>#<slice> for each slice")
     main = main_root(ctx["root"])
     run(["git", "fetch", "origin"], main)
     if not fl.git(main, "rev-parse", "--verify", "--quiet", "origin/HEAD"):  # the default branch, not a hard-coded main
@@ -151,12 +151,18 @@ def cmd_build(a):
         (wt / spec_path).write_text(f"# {iss['title']}\n\n{(iss['body'] or '').strip()}\n", "utf-8")
     fl.save_state(w, phase="build", tier=t, spec_path=spec_path)
     notes = fl.notes_path(w).relative_to(wt).as_posix()
-    review = (" When fast verify passes, run `/code-review medium`, fix the findings you can demonstrate with a failing"
-              " test, and list the rest under Needs you." if t >= 2 else "")
-    return launch(w, f"Implement the spec in {spec_path}. Keep {notes} current. Run `fx verify --fast` and"
-                  f" `fx ship` with the Bash tool's run_in_background, and wait for their result.{review} Then write"
-                  f" {rel}/packet.md from {CORE.as_posix()}/plugins/factory/templates/packet.md using this repo's"
-                  f" [packet] headings, and run `fx ship {n}`.", "build")
+    review = {2: "; if it names none, one independent review in a fresh context given only the spec and the diff",
+              3: "; if it names none, that review plus a security review"}.get(t, "")  # A5: the user's rules win
+    return launch(w, f"Implement the spec in {spec_path}, unattended: nobody is watching. Keep {notes} current. Run"
+                  " `fx verify --fast` and `fx ship` with the Bash tool's run_in_background, and wait for their result."
+                  " Show the change working the way your setup says, end to end where it is user-facing. Run the reviews"
+                  f" your setup requires for T{t}{review}. Fix the findings you can demonstrate with a failing test and"
+                  f" list the rest under Needs you. Then write {rel}/packet.md from {CORE.as_posix()}/plugins/factory/"
+                  f"templates/packet.md using this repo's [packet] headings, with what you exercised, and run `fx ship {n}`."
+                  f" Then make the PR's checks pass; if its factory/tier is above T{t}, run that tier's reviews too. When"
+                  " a failure repeats past your setup's limit (3 if none), or the next step is irreversible or needs the"
+                  f" owner, write a `## Blocker` section in {notes} with the question, post it as an issue comment, and stop.",
+                  "build")
 
 def cmd_verify(a):
     ctx = fl.repo_ctx(".")

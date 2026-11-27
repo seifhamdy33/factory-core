@@ -228,8 +228,11 @@ class Flows(FactoryTest):
         self.assertEqual((st["phase"], st["tier"], st["spec_path"]), ("build", 1, ".factory/work/7/spec.md"))
         w, prompt, phase = launch.call_args.args
         self.assertEqual((w["root"], phase), (wt, "build"))
-        self.assertTrue(prompt.startswith("Implement the spec in .factory/work/7/spec.md. Keep .factory/work/7/progress.md"))
-        self.assertNotIn("/code-review", prompt)
+        self.assertTrue(prompt.startswith("Implement the spec in .factory/work/7/spec.md, unattended"))
+        self.assertIn("Keep .factory/work/7/progress.md current", prompt)
+        self.assertIn("Run the reviews your setup requires for T1. Fix", prompt)  # no default review at T1
+        self.assertIn("write a `## Blocker` section in .factory/work/7/progress.md", prompt)
+        self.assertRegex("## Blocker\nq\n", fl.BLOCKER)  # the heading the prompt names is the one fx detects
         for ch in '<>|&%"':
             self.assertNotIn(ch, prompt)  # claude is a .CMD on Windows
 
@@ -252,12 +255,20 @@ class Flows(FactoryTest):
         code, _, err, launch = self.fx_in(main, fake, "build", "7")
         self.assertEqual(code, 0, err)
         self.assertFalse(fake.has("gh", "pr", "list"))  # no pin lookup
-        self.assertIn("run `/code-review medium`", launch.call_args.args[1])
+        self.assertIn("for T2; if it names none, one independent review in a fresh context", launch.call_args.args[1])
         self.assertEqual(fl.load_json(ctx["work"] / "state.json")["tier"], 2)
 
     def remote_head(self, main, branch="main"):  # as `git clone` leaves it: origin/HEAD -> the default branch
         git(main, "update-ref", f"refs/remotes/origin/{branch}", "HEAD")
         git(main, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{branch}")
+
+    def test_ShapeRefusesAWorkspaceParent(self):  # D23: the kickoff splits a parent into slices
+        main = self.main_repo(cfg='project = "ws"\n[workspace]\norder = ["api"]\n[workspace.repos.api]\nrepo = "o/api"\n')
+        fake = FakeRun({"gh issue view": {"title": "Both", "labels": [{"name": "factory:parent"}], "body": ""}})
+        code, _, err, launch = self.fx_in(main, fake, "shape", "7")
+        self.assertEqual(code, 1)
+        self.assertIn("#7 is a workspace parent: /factory:idea split it into slices\nNext: fx shape <key>#<slice>", err)
+        launch.assert_not_called()
 
     def test_ShapeCreatesWorktreeAndState(self):
         main = self.main_repo()

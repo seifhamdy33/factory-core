@@ -8,8 +8,8 @@ BUDGETS = {
     "plugins/factory/hooks/test_lock.py": 80,
     "plugins/factory/hooks/reinject.py": 60,
     "plugins/factory/lib/factory_lib.py": 250,  # owner 2026-11-27: raised from 200 (Windows Job Object tree kill)
-    "plugins/factory/skills/idea/SKILL.md": 30,
-    "plugins/factory/skills/shape/SKILL.md": 120,
+    "plugins/factory/skills/idea/SKILL.md": 50,  # D23: it now holds the interview
+    "plugins/factory/skills/shape/SKILL.md": 60,
     "bin/fx": 345,  # owner 2026-11-27: raised from 220 to 340 (waiting list, pin check, ship), then to 345 (setup)
     "bin/fx.cmd": 1,
     "ci/gates.py": 200,
