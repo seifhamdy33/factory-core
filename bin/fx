@@ -217,7 +217,10 @@ def cmd_clean(a):
     pr = gh_json("pr", "view", w["state"].get("pr") or w["branch"], "-R", w["repo"], "--json", "state,url")
     if pr["state"] != "MERGED":
         refuse(f"{pr['url']} is {pr['state'].lower()}, not merged", f"the owner merges it, then fx clean {ref}")
-    ledger(w, pr["url"])  # replaces the row, so review fixes after ship are counted
+    clean(w, n, pr["url"])
+
+def clean(w, n, url):  # archive the notes and packet, stop the sessions, remove the worktree and branch
+    ledger(w, url)  # replaces the row, so review fixes after ship are counted
     arch = fl.home() / "archive" / w["repo"] / n
     arch.mkdir(parents=True, exist_ok=True)
     for f in (fl.notes_path(w), w["work"] / "packet.md"):
@@ -302,6 +305,15 @@ def drift():  # SP1: the installed plugin is a cache copy, so core edits need `c
 
 def cmd_status(a):
     repos = collect()
+    for r in repos if a.cmd is None else []:  # bare fx only: clean merged worktrees with a clean tree; dirty ones stay listed
+        merged = {p["url"] for p in r["prs"] if p["state"] == "MERGED"}
+        for i, w in list(r["wts"].items()):
+            if w["state"].get("pr") in merged and fl.git(w["path"], "status", "--porcelain") == "":
+                try:
+                    clean(fl.repo_ctx(w["path"]), i, w["state"]["pr"])
+                    del r["wts"][i]
+                except Refused as e:
+                    print(f"fx: could not clean {ref_of(r, i)}: {e}", file=sys.stderr)
     print(table(repos) + "\n\nWaiting on you:" + ("".join(f"\n- {x}" for x in waiting(repos)) or " nothing"))
     if d := drift():
         print("\n" + d)

@@ -393,6 +393,27 @@ class Flows(FactoryTest):
         self.assertIn("7      T1    build", out)
         self.assertIn("Waiting on you:\n- 7: ship failed at unit. Next: `fx build 7`", out)
 
+    def test_BareFxCleansMergedCleanWorktrees(self):  # item 13: bare fx only; a dirty worktree stays and is listed
+        u7, u8 = "https://github.com/o/r/pull/7", "https://github.com/o/r/pull/8"
+        main, wt7, ctx7 = self.worktree(pr=u7)
+        write(ctx7["work"] / "progress.md", "notes\n")
+        wt8 = self.tmp / "wts" / "8-add-thing"
+        git(main, "worktree", "add", "-q", "-b", "f/8-add-thing", str(wt8))
+        fl.save_state(fl.repo_ctx(wt8), issue="8", branch="f/8-add-thing", phase="build", tier=1, pr=u8)
+        write(wt8 / "wip.py", "x = 1\n")  # uncommitted work
+        fake = FakeRun({"gh pr list": [pr(7, "f/7-add-thing", "MERGED", repo="r"), pr(8, "f/8-add-thing", "MERGED", repo="r")]})
+        code, out, err, _ = self.fx_in(main, fake, "status")
+        self.assertEqual(code, 0, err)
+        self.assertTrue(wt7.exists())  # `fx status` never cleans
+        code, out, err, _ = self.fx_in(main, fake)
+        self.assertEqual(code, 0, err)
+        self.assertFalse(wt7.exists())
+        self.assertIn("Cleaned #7", out)
+        self.assertEqual((self.home / "archive" / "o" / "r" / "7" / "progress.md").read_text("utf-8"), "notes\n")
+        self.assertTrue(wt8.exists())
+        self.assertIn("- `fx clean 8`", out)
+        self.assertNotIn("`fx clean 7`", out)
+
     def test_VerifyPrintsTotal(self):
         _, wt, _ = self.worktree()
         with contextlib.chdir(wt):
