@@ -1,0 +1,8 @@
+[
+  {"sha": "f1", "filename": "src/app.py", "status": "modified", "additions": 12, "deletions": 3, "changes": 15,
+   "patch": "@@ -1,3 +1,12 @@\n-x = 1\n+x = 2\n+def thing():\n+    return x\n"},
+  {"sha": "f2", "filename": "tests/test_app.py", "status": "modified", "additions": 4, "deletions": 2, "changes": 6,
+   "patch": "@@ -10,6 +10,8 @@ def test_thing():\n     y = thing()\n-    assert y == 2\n     z = 3\n-    self.assertEqual(z, 3)\n+    self.assertEqual(z, 3)\n+    print(y)\n"},
+  {"sha": "f3", "filename": "docs/specs/7-add-thing.md", "status": "added", "additions": 20, "deletions": 0, "changes": 20,
+   "patch": "@@ -0,0 +1,20 @@\n++++\n+id = 7\n"}
+]

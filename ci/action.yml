@@ -1,0 +1,16 @@
+name: factory gates
+description: >-
+  factory/integrity and factory/tier commit statuses, the tier:T<n> label and one summary comment for a PR
+  (report-only in Phase 1). Call it only from a pull_request_target workflow; it reads the PR through the API and
+  never checks out or runs PR code. A spec-approved label event also writes pin.json for upload as factory-pin.
+outputs:
+  pin: {description: "true when pin.json was written", value: "${{ steps.gates.outputs.pin }}"}
+  pin_path: {description: "path of pin.json", value: "${{ steps.gates.outputs.pin_path }}"}
+runs:
+  using: composite
+  steps:
+    - id: gates
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: python3 "$GITHUB_ACTION_PATH/gates.py"

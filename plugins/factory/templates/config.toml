@@ -1,0 +1,47 @@
+# .factory/config.toml: the factory overlay for this repo (factory-core spec: Overlay contract).
+# Set only what differs from the core defaults shown in the comments. This file is a gate file (always T3).
+project = "<repo-name>"                       # required
+
+# tests = ["tests/**", "test/**", "**/test_*.py", "**/*_test.py", "**/*.test.*", "**/*.spec.*"]
+# acceptance_glob = "tests/acceptance/test_{issue}_*"
+# specs_dir = "docs/specs"
+# spec_name = "{issue}-{slug}.md"             # also {date} (YYYY-MM-DD)
+# branch = "f/{issue}-{slug}"                 # also {type}, from the issue's type:<prefix> label
+# branch_types = []                           # e.g. ["feat", "fix", "docs", "chore", "ops"]; first is the default
+# worktree_root = "../{project}-worktrees"
+# worktree_name = "{issue}-{slug}"
+# quarantine = []                             # test ids no acceptance check may reference
+
+[verify]
+# fast_budget_s = 300
+# cap_s = 600
+# full_cap_s = 3600
+# fast_locks = []
+# full_locks = []                             # e.g. ["docker"] when --full needs the machine's only docker stack
+
+[tiers]
+# docs_globs = ["docs/**", "**/*.md"]
+# sensitive = []                              # paths that make a change T3
+# gate_extra = []                             # extra gate files (always T3)
+
+[integrity]
+# threshold_globs = ["**/jest.config.*", "**/vitest.config.*", "**/.eslintrc*", "**/eslint.config.*",
+#                    "**/tsconfig*.json", "**/.coveragerc", "**/.nycrc*"]
+
+[authority]
+approver = ""                                 # the GitHub login whose spec-approved label counts (T2+)
+
+[packet]
+# max_lines = 40
+# extra = []                                  # extra headings, e.g. ["### Checklist"]
+
+[packet.headings]
+# intent = "## Intent"
+# ac = "## Acceptance checks"
+# changed = "## What changed"
+# deviations = "## Deviations from spec"
+# test_changes = "## Test changes"
+# new_deps = "## New dependencies"
+# look_here = "## Look here"
+# not_verified = "## Not verified"            # a heading without "Not verified" needs a "Not verified: ..." line
+# rollback = "## Rollback"

@@ -1,0 +1,5 @@
+{
+  "name": "factory-core",
+  "owner": {"name": "factory-core"},
+  "plugins": [{"name": "factory", "source": "./plugins/factory", "description": "Software factory: Stop verify gate, acceptance-test lock, context reinjection, and the idea/shape/ship skills."}]
+}

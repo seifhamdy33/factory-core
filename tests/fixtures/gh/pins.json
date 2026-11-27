@@ -1,0 +1,6 @@
+[
+  {"run": {"id": 9001, "event": "pull_request_target", "path": ".github/workflows/factory.yml"},
+   "pin": {"pr": 12, "head": "headold", "spec": "docs/specs/7-add-thing.md", "blob": "blobold", "by": "the-approver", "label_event_id": 101}},
+  {"run": {"id": 9002, "event": "pull_request_target", "path": ".github/workflows/factory.yml"},
+   "pin": {"pr": 12, "head": "head0000000000000000000000000000000000aa", "spec": "docs/specs/7-add-thing.md", "blob": "blob104", "by": "the-approver", "label_event_id": 104}}
+]

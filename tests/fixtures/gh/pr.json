@@ -1,0 +1,10 @@
+{
+  "number": 12,
+  "html_url": "https://github.com/o/r/pull/12",
+  "draft": false,
+  "user": {"login": "the-owner"},
+  "head": {"sha": "head0000000000000000000000000000000000aa", "ref": "f/7-add-thing"},
+  "base": {"sha": "base0000000000000000000000000000000000bb", "ref": "main"},
+  "labels": [{"name": "tier:T2"}, {"name": "spec-approved"}],
+  "body": "Closes #7\n## Intent\nAdd the thing."
+}

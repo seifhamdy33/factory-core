@@ -1,0 +1,7 @@
+# ~/.factory/config.toml: machine-local factory settings (spec: Machine-local state). Never committed anywhere.
+# user/apply.py copies this file there when it is missing; edit the copy, not this template.
+verify_slots = 2        # verify runs at once across worktrees
+lock_wait_s = 300       # wait at most this long for verify locks, then block with reason lock-timeout
+
+[session]
+build_note = "This is delegating mode: a spec exists; work to the finish line."

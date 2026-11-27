@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+"""fx: the factory CLI (spec: Design > fx). Every refusal prints its cause and one "Next:" line (D10)."""
+import argparse, datetime, json, os, re, shutil, subprocess, sys
+from pathlib import Path
+
+CORE = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(CORE / "plugins" / "factory" / "lib"), str(CORE / "ci")]
+import factory_lib as fl  # noqa: E402
+import gates, tier  # noqa: E402
+
+MODELS = {0: ("sonnet", "medium"), 1: ("sonnet", "medium"), 2: ("opus", "medium"), 3: ("opus", "high")}
+LABEL, PR_FIELDS = gates.LABEL, "number,url,isDraft,state,headRefName,labels,statusCheckRollup"
+
+class Refused(Exception):
+    pass
+
+def refuse(cause, nxt):
+    raise Refused(f"{cause}\nNext: {nxt}")
+
+def run(cmd, cwd=None):
+    r = subprocess.run([str(c) for c in cmd], cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode:
+        refuse(f"`{' '.join(map(str, cmd[:3]))}` failed: {(r.stderr or r.stdout).strip()[-600:]}", "fix the cause above, then rerun")
+    return r.stdout.strip()
+
+def gh_json(*args, cwd=None):
+    return json.loads(run(["gh", *args], cwd) or "null")
+
+def slug(title):
+    return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40].strip("-") or "issue"  # non-ASCII titles
+
+def names(cfg, n, title, labels):  # -> (branch, worktree dir name) from the config patterns
+    types = [lb["name"][5:] for lb in labels if lb["name"].startswith("type:")]
+    typ = next((t for t in types if t in cfg["branch_types"]), (cfg["branch_types"] or [""])[0])
+    f = {"issue": n, "slug": slug(title), "type": typ, "project": cfg["project"]}
+    return cfg["branch"].format(**f), cfg["worktree_name"].format(**f)
+
+def label_tier(labels, default=1):
+    got = [tier.tier_num(lb["name"][5:]) for lb in labels if lb["name"].startswith("tier:")]
+    return max([t for t in got if t is not None], default=default)
+
+def resolve(ref, cwd="."):  # <n> = the current git root's repo; <key>#<n> = [workspace] repos.<key> -> (ctx, n, key)
+    ctx = fl.repo_ctx(cwd)
+    m = re.fullmatch(r"(?:([\w.-]+)#)?(\d+)", str(ref)) if ref is not None else None
+    if ref is None:
+        return (ctx, ctx["issue"], None) if ctx and ctx["issue"] else refuse("not in a factory worktree", "pass the issue: fx ship <id>")
+    if not m:
+        refuse(f"bad ref {ref!r}", "use <n>, or <key>#<n> from the workspace root")
+    key, n = m.groups()
+    if ctx and key:
+        r = ((ctx["cfg"] or {}).get("workspace") or {}).get("repos", {}).get(key)
+        if not r:
+            refuse(f"no [workspace] repos.{key} in {ctx['root']}", "run fx from the workspace root, or pass <n> inside the repo")
+        ctx = fl.repo_ctx(ctx["root"] / r["path"])
+    if not ctx or not ctx["cfg"] or not ctx["repo"]:
+        refuse(f"{Path(cwd).resolve()} is not a factory repo (needs .factory/config.toml and a github.com origin)",
+               "cd into the repo or the workspace root, or add the overlay")
+    return ctx, n, key
+
+def main_root(root):
+    return Path(fl.git(root, "rev-parse", "--path-format=absolute", "--git-common-dir") or Path(root) / ".git").parent
+
+def worktrees(ctx):  # {issue: path} for linked worktrees on a branch matching the config pattern
+    out, path, first = {}, None, True
+    for ln in (fl.git(ctx["root"], "worktree", "list", "--porcelain") or "").splitlines():
+        if ln.startswith("worktree "):
+            path, first = (Path(ln[9:]), path is None)
+        elif ln.startswith("branch refs/heads/") and not first and (i := fl.parse_issue(ctx["cfg"]["branch"], ln[18:])):
+            out[i] = path
+    return out
+
+def worktree_ctx(ref):
+    ctx, n, key = resolve(ref)
+    wt = worktrees(ctx).get(n) or refuse(f"no worktree for #{n} in {ctx['repo']}", f"fx shape {ref or n}")
+    return fl.repo_ctx(wt), n, ref or n
+
+def spec_file(root, cfg, n):  # the spec under specs_dir whose frontmatter id == n (T2/T3)
+    for p in sorted((root / cfg["specs_dir"]).glob("*.md")):
+        try:
+            if str(fl.load_spec(p)[0].get("id")) == str(n):
+                return p.relative_to(root).as_posix()
+        except ValueError:
+            continue
+
+def open_pr(w):
+    prs = gh_json("pr", "list", "-R", w["repo"], "--head", w["branch"], "--state", "open", "--json", "number,url,isDraft")
+    return (prs or [None])[0]
+
+def pin_ok(w, pr_number, spec):  # the latest factory-pin for this PR is by the approver for this exact blob
+    pins = [p["pin"] for p in gates.collect_pins(gates.Api(w["repo"], run(["gh", "auth", "token"])))
+            if p["pin"].get("pr") == pr_number]
+    want = {"spec": spec, "blob": fl.git(w["root"], "hash-object", spec), "by": w["cfg"]["authority"]["approver"]}
+    return bool(pins) and all(pins[-1].get(k) == v for k, v in want.items())
+
+def launch(cwd, t, prompt, phase):
+    m, e = MODELS[t]
+    print(f"Launching claude ({m}/{e}) in {cwd}. A new worktree shows the trust prompt once: accept it.")
+    env = os.environ | {"FACTORY_PHASE": phase, "CLAUDE_CODE_USE_POWERSHELL_TOOL": "0"}
+    return subprocess.call([shutil.which("claude") or "claude", "--model", m, "--effort", e, prompt], cwd=cwd, env=env)
+
+def ledger(w, url):
+    st = w["state"]
+    run([sys.executable, CORE / "metrics" / "ledger.py", "append", "--repo", w["repo"], "--issue", w["issue"],
+         "--tier", st.get("tier", 1), "--branch", w["branch"], "--worktree", w["root"], "--pr", url,
+         *(["--parent", st["parent"]] if st.get("parent") else [])], w["root"])
+
+def cmd_shape(a):
+    ctx, n, _ = resolve(a.ref)
+    cfg, repo = ctx["cfg"], ctx["repo"]
+    iss = gh_json("issue", "view", n, "-R", repo, "--json", "title,labels,body")
+    if "workspace" in cfg and "factory:parent" in {lb["name"] for lb in iss["labels"]}:
+        return launch(ctx["root"], 3, f"/factory:shape {a.ref}", "shape")  # a workspace parent: no worktree
+    main = main_root(ctx["root"])
+    run(["git", "fetch", "origin"], main)
+    branch, wname = names(cfg, n, iss["title"], iss["labels"])
+    wt = worktrees(ctx).get(n) or (main / cfg["worktree_root"].format(project=cfg["project"])).resolve() / wname
+    if not wt.exists():
+        has = fl.git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
+        run(["git", "worktree", "add", wt, branch] if has else ["git", "worktree", "add", "-b", branch, wt, "origin/main"], main)
+    m = re.search(r"^Parent: (\S+#\d+)\s*$", iss.get("body") or "", re.M)
+    fl.save_state(fl.repo_ctx(wt), issue=n, repo=repo, branch=branch, worktree=str(wt), parent=m and m.group(1),
+                  phase="shape", tier=label_tier(iss["labels"]))
+    return launch(wt, 3, f"/factory:shape {n}", "shape")
+
+def cmd_build(a):
+    if a.cloud:
+        refuse("Phase 1 is local-only.", f"fx build {a.ref}")
+    w, n, ref = worktree_ctx(a.ref)
+    cfg, wt, rel = w["cfg"], w["root"], f".factory/work/{n}"
+    iss = gh_json("issue", "view", n, "-R", w["repo"], "--json", "title,labels,body")
+    spec = spec_file(wt, cfg, n)
+    t = max(label_tier(iss["labels"], w["state"].get("tier", 1)), tier.tier_num(spec and fl.load_spec(wt / spec)[0].get("tier")) or 0)
+    if t >= 2:
+        if not spec:
+            refuse(f"T{t} needs a spec file under {cfg['specs_dir']} with id = {n}", f"fx shape {ref}")
+        pr = open_pr(w)
+        if not pr or not pin_ok(w, pr["number"], spec):
+            where = pr["url"] if pr else f"the draft PR (fx ship {n} --draft)"
+            refuse(f"{spec} has no approval pin matching its current content",
+                   f"as {cfg['authority']['approver'] or 'the approver'}, add label {LABEL} on {where}, then fx build {ref}")
+        spec_path = spec
+    elif t == 1:
+        spec_path = f"{rel}/spec.md"
+        if not (wt / spec_path).is_file():
+            block = fl.extract_block(iss["body"]) or refuse(f"issue #{n} has no factory:spec block", f"fx shape {ref}")
+            (wt / spec_path).write_text(block + "\n", "utf-8")
+    else:
+        spec_path = f"{rel}/intent.md"
+        (wt / spec_path).write_text(f"# {iss['title']}\n\n{(iss['body'] or '').strip()}\n", "utf-8")
+    fl.save_state(w, phase="build", tier=t, spec_path=spec_path)
+    review = (" When fast verify passes, run `/code-review medium`, fix the findings you can demonstrate with a failing"
+              " test, and list the rest under Look here." if t >= 2 else "")
+    return launch(wt, t, f"Implement the spec in {spec_path}. Keep {rel}/progress.md current. Run `fx verify --fast` and"
+                  f" `fx ship` with the Bash tool's run_in_background, and wait for their result.{review} Then write"
+                  f" {rel}/packet.md from {CORE.as_posix()}/plugins/factory/templates/packet.md using this repo's"
+                  f" [packet] headings, and run `fx ship {n}`.", "build")
+
+def cmd_verify(a):
+    ctx = fl.repo_ctx(".")
+    if not ctx or not ctx["cfg"]:
+        refuse("not in a factory repo (no .factory/config.toml)", "cd into a factory worktree")
+    res = fl.run_verify(ctx, "full" if a.full else "fast")
+    print("\n".join(res["lines"] + ([] if res["ok"] else [res["tail"]])))
+    state = "ok" if res["ok"] else f"FAIL ({res['reason']}: {', '.join(res['failed'])})"
+    print(f"{state}{' (over budget)' if res['over_budget'] else ''}; total {res['seconds']:.0f}s")
+    return 0 if res["ok"] else 1
+
+def cmd_ship(a):
+    w, n, _ = worktree_ctx(a.id)
+    cfg, work, t, stage = w["cfg"], w["work"], int(w["state"].get("tier", 1)), "packet"
+    who, pr = cfg["authority"]["approver"] or "the approver", open_pr(w)
+    try:
+        if a.draft:
+            if not (spec := spec_file(w["root"], cfg, n)):
+                refuse(f"no spec with id = {n} under {cfg['specs_dir']}", f"/factory:shape {n} writes and commits it")
+            body =(f"Spec awaiting approval: https://github.com/{w['repo']}/blob/{w['branch']}/{spec}. "
+                    f"Next: as {who}, add label {LABEL}.\n")
+        else:
+            text = (work / "packet.md").read_text("utf-8") if (work / "packet.md").is_file() else ""
+            if probs := (fl.packet_check(text, cfg, t) if text else ["no packet.md"]):
+                refuse(f"{work / 'packet.md'}: " + "; ".join(probs), f"fix packet.md, then fx ship {n}")
+            fl.save_state(w, ship="running")
+            res = fl.run_verify(w, "full")
+            fl.log("fx_ship", w, decision="ship" if res["ok"] else "refuse", reason=res["reason"], verify_ok=res["ok"])
+            if not res["ok"]:
+                stage = ",".join(res["failed"])
+                refuse(f"verify --full failed ({res['reason']}: {stage})\n{res['tail']}", f"fix it, then fx ship {n}")
+            body, stage = text.rstrip() + "\n", "push"
+        run(["git", "push", "-u", "origin", w["branch"]], w["root"])
+        (work / "pr_body.md").write_text(f"{body}\nCloses #{n}\n", "utf-8")
+        bf, repo = ["--body-file", work / "pr_body.md"], ["-R", w["repo"]]
+        if pr and not a.draft:  # a draft PR goes ready: the pin artifact stays valid
+            run(["gh", "pr", "edit", pr["number"], *repo, *bf], w["root"])
+            if pr["isDraft"]:
+                run(["gh", "pr", "ready", pr["number"], *repo], w["root"])
+        title = None if pr else gh_json("issue", "view", n, *repo, "--json", "title")["title"]
+        url = pr["url"] if pr else run(["gh", "pr", "create", *repo, "--head", w["branch"], "--title", title, *bf,
+                                        "--label", f"tier:T{t}", *(["--draft"] if a.draft else [])], w["root"]).splitlines()[-1]
+    except Refused:
+        if not a.draft:
+            fl.save_state(w, ship=f"failed:{stage}")
+        raise
+    fl.save_state(w, pr=url, **({} if a.draft else {"ship": "ok"}))
+    if not a.draft:
+        ledger(w, url)
+    print(url)
+    print(f"Next: as {who}, review the spec on {url} and add label {LABEL}; then fx build {n}" if a.draft
+          else "Next: wait for CI; fx lists the PR under Waiting on you.")
+
+def cmd_ledger(a):
+    ctx = fl.repo_ctx(".")
+    if not ctx or not ctx["work"]:
+        refuse("not in a factory worktree", "cd into the worktree of the shipped issue")
+    ledger(ctx, a.pr)
+
+def cmd_clean(a):
+    w, n, ref = worktree_ctx(a.ref)
+    pr = gh_json("pr", "view", w["state"].get("pr") or w["branch"], "-R", w["repo"], "--json", "state,url")
+    if pr["state"] != "MERGED":
+        refuse(f"{pr['url']} is {pr['state'].lower()}, not merged", f"the owner merges it, then fx clean {ref}")
+    ledger(w, pr["url"])  # replaces the row, so review fixes after ship are counted
+    arch = fl.home() / "archive" / w["repo"] / n
+    arch.mkdir(parents=True, exist_ok=True)
+    for f in ("progress.md", "packet.md"):
+        if (w["work"] / f).is_file():
+            shutil.copy2(w["work"] / f, arch / f)
+    main = main_root(w["root"])
+    run(["git", "worktree", "remove", w["root"]], main)  # refuses when the worktree has changes
+    run(["git", "branch", "-D", w["branch"]], main)  # only because GitHub says the PR is merged
+    print(f"Cleaned #{n}: archived to {arch}; removed {w['root']} and branch {w['branch']}.")
+
+def collect(cwd="."):  # [{key, cfg, repo, wts: {issue: {path, state}}, prs}] in workspace order
+    ctx = fl.repo_ctx(cwd)
+    if not ctx or not ctx["cfg"]:
+        refuse("not in a factory repo or workspace (no .factory/config.toml)", "cd into one")
+    ws = ctx["cfg"].get("workspace")
+    out = []
+    for k in (ws.get("order") or list(ws["repos"])) if ws else [None]:
+        c = fl.repo_ctx(ctx["root"] / ws["repos"][k]["path"]) if k else ctx
+        if c and c["cfg"]:
+            wts = {i: {"path": p, "state": fl.load_json(p / ".factory" / "work" / i / "state.json", {})}
+                   for i, p in worktrees(c).items()}
+            prs = gh_json("pr", "list", "-R", c["repo"], "--state", "all", "--limit", "100", "--json", PR_FIELDS) if c["repo"] else []
+            out.append({"key": k, "cfg": c["cfg"], "repo": c["repo"], "wts": wts, "prs": prs or []})
+    return out
+
+def ref_of(r, i):
+    return f"{r['key']}#{i}" if r["key"] else str(i)
+
+def table(repos):
+    rows = [("issue", "tier", "phase", "last verify", "PR", "ship")]
+    for r in repos:
+        for i, w in sorted(r["wts"].items(), key=lambda x: int(x[0])):
+            st, lv = w["state"], w["state"].get("last_verify") or {}
+            v = (f"{'ok' if lv['ok'] else 'red ' + ','.join(lv.get('failed', []))} {lv.get('mode')} {lv.get('seconds', 0):.0f}s"
+                 f"{' over budget' if lv.get('over_budget') else ''}") if lv else "-"
+            rows.append((ref_of(r, i), f"T{st.get('tier', '?')}", st.get("phase", "-"), v, st.get("pr") or "-", st.get("ship") or "-"))
+    wid = [max(len(str(x[c])) for x in rows) for c in range(6)]
+    return "\n".join("  ".join(str(x[c]).ljust(wid[c]) for c in range(6)).rstrip() for x in rows)
+
+def waiting(repos):  # the "Waiting on you" list; approver and order come from config, never hard-coded
+    out, first = [], repos[0] if repos else {"prs": []}
+    first_open = {p["url"] for p in first["prs"] if p["state"] == "OPEN"}
+    for r in repos:
+        who, by_url = r["cfg"]["authority"]["approver"] or "the approver", {p["url"]: p for p in r["prs"]}
+        by_head = {w["state"].get("branch"): w["state"] for w in r["wts"].values()}
+        for p in r["prs"]:
+            if p["state"] != "OPEN" or not fl.parse_issue(r["cfg"]["branch"], p["headRefName"]):
+                continue
+            if p["isDraft"]:  # a valid pin shows as factory/integrity SUCCESS (I7 runs at T2+)
+                pinned = any(c.get("context") == "factory/integrity" and c.get("state") == "SUCCESS"
+                             for c in p.get("statusCheckRollup") or [])
+                if not pinned or LABEL not in {lb["name"] for lb in p["labels"]}:
+                    out.append(f"as {who}, add `{LABEL}`: {p['url']}")
+                continue
+            par = (by_head.get(p["headRefName"]) or {}).get("parent")
+            dep = r is not first and par and next((w["state"]["pr"] for w in first["wts"].values()
+                                                   if w["state"].get("parent") == par and w["state"].get("pr") in first_open), None)
+            out.append(f"merge {first['key']} PR {dep} first: {p['url']}" if dep else f"review/merge: {p['url']}")
+        for i, w in sorted(r["wts"].items()):
+            st, prog = w["state"], Path(w["path"]) / ".factory" / "work" / i / "progress.md"
+            if str(st.get("ship", "")).startswith("failed:"):
+                out.append(f"{ref_of(r, i)}: ship failed at {st['ship'][7:]}. Next: `fx build {ref_of(r, i)}`")
+            if prog.is_file() and re.search(r"^## Blocker", prog.read_text("utf-8", "replace"), re.M):
+                out.append(f"unblock: {prog}")
+            if by_url.get(st.get("pr"), {}).get("state") == "MERGED":
+                out.append(f"`fx clean {ref_of(r, i)}`")
+    return out
+
+def weekly(today=None):  # ask for the weekly /usage % once per ISO week, only in a terminal
+    d = today or datetime.date.today()
+    week, p = "{}-W{:02d}".format(*d.isocalendar()[:2]), fl.home() / "metrics" / "weekly.csv"
+    rows = p.read_text("utf-8").splitlines() if p.exists() else []
+    if not sys.stdin.isatty() or any(r.split(",")[0] == week for r in rows):
+        return
+    try:
+        pct = re.sub(r"[^\d.]", "", input("Weekly /usage % (Enter to skip): "))
+    except EOFError:  # Windows: a NUL stdin passes isatty(), then reads EOF
+        return
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "a", encoding="utf-8", newline="") as f:
+        f.write(("" if rows else "week,date,usage_pct\n") + f"{week},{d.isoformat()},{pct}\n")
+
+def drift():  # SP1: the installed plugin is a cache copy, so core edits need `claude plugin update`
+    src = CORE / "plugins" / "factory"
+    files = lambda d: {p.relative_to(d).as_posix(): p.read_bytes() for p in d.rglob("*") if p.is_file() and "__pycache__" not in p.parts}  # noqa: E731
+    for e in (fl.load_json(Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "plugins" / "installed_plugins.json", {}).get("plugins") or {}).get("factory@factory-core", []):
+        inst = Path(e.get("installPath") or "")
+        if inst.is_dir() and inst.resolve() != src.resolve() and files(inst) != files(src):
+            return f"warning: the installed factory plugin ({inst}) differs from {src}.\nNext: claude plugin update factory@factory-core"
+
+def cmd_status(a):
+    weekly()
+    repos = collect()
+    print(table(repos) + "\n\nWaiting on you:" + ("".join(f"\n- {x}" for x in waiting(repos)) or " nothing"))
+    if d := drift():
+        print("\n" + d)
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="fx", description="factory CLI (Phase 1, local only)")
+    sub = p.add_subparsers(dest="cmd")
+    for name, pos, flags in (("status", [], []), ("shape", ["ref"], []), ("build", ["ref"], ["--cloud"]), ("clean", ["ref"], []),
+                             ("verify", [], ["--fast", "--full"]), ("ship", ["id?"], ["--draft"])):
+        sp = sub.add_parser(name)
+        for x in pos:
+            sp.add_argument(x.rstrip("?"), nargs="?" if x.endswith("?") else None)
+        for x in flags:
+            sp.add_argument(x, action="store_true")
+    sub.add_parser("ledger").add_argument("--pr", required=True)
+    a = p.parse_args(argv)
+    try:
+        return globals()[f"cmd_{a.cmd or 'status'}"](a) or 0
+    except Refused as e:
+        print(f"fx {a.cmd or 'status'}: {e}", file=sys.stderr)
+        return 1
+
+if __name__ == "__main__":
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    sys.exit(main())

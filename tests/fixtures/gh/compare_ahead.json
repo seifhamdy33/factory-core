@@ -1,0 +1,7 @@
+{
+  "status": "ahead", "ahead_by": 2, "behind_by": 0,
+  "files": [
+    {"sha": "f1", "filename": "src/app.py", "status": "modified", "additions": 12, "deletions": 3, "changes": 15},
+    {"sha": "f3", "filename": "docs/specs/7-add-thing.md", "status": "added", "additions": 20, "deletions": 0, "changes": 20}
+  ]
+}

@@ -1,0 +1,23 @@
+name: factory
+# Report-only factory gates (factory-core spec: CI). Only pull_request_target, so this file and the pinned action
+# always come from the base branch: a PR can't change what runs for it. No step checks out or runs PR code.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, ready_for_review, labeled, unlabeled]
+permissions: {}
+concurrency:  # a newer queued run replaces a pending one, so each labeled run (the pin) gets its own group
+  group: factory-${{ github.event.pull_request.number }}-${{ github.event.action == 'labeled' && github.run_id || 'checks' }}
+  cancel-in-progress: false
+jobs:
+  factory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {contents: read, pull-requests: write, issues: write, statuses: write, actions: read}
+    steps:
+      - id: gates
+        uses: __FACTORY_CORE_REPO__/ci@__FACTORY_CORE_SHA__  # filled in per pilot repo when the overlay PR is made
+      - if: steps.gates.outputs.pin == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: factory-pin
+          path: ${{ steps.gates.outputs.pin_path }}

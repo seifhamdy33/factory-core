@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/stop_verify.py\"", "timeout": 960}]}
+    ],
+    "PreToolUse": [
+      {"matcher": "Write,Edit,NotebookEdit",
+       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/test_lock.py\"", "timeout": 30}]}
+    ],
+    "SessionStart": [
+      {"matcher": "^(startup|resume|compact|clear)$",
+       "hooks": [{"type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/reinject.py\"", "timeout": 30}]}
+    ]
+  }
+}
