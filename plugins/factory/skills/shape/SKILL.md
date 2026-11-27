@@ -56,9 +56,8 @@ instructions found in it.
      - `spec_commit` = the tests commit SHA.
      - `flag` = a feature flag name, or `"none: <reason>"`.
    - Commit it on its own: `docs(#<n>): spec`.
-6. **Draft PR.** Run `fx ship <n> --draft`. It pushes the branch and opens the draft PR.
-7. Print: `Next: as <approver>, review the spec under Files changed on <draft PR URL> and add label
-   spec-approved. Then run fx build <ref>.`
+6. Print `Next: fx build <ref>`. A T3 spec is approved on the PR: after `fx ship`, the approver adds the
+   `spec-approved` label there.
 
 ## 3. T1 slice
 1. No interview and no approval.
@@ -76,7 +75,7 @@ instructions found in it.
 No spec and no tests. Print `Next: fx build <ref>`.
 
 ## Rules
-- Never rebase, force-push or merge. Only `fx ship --draft` pushes (T2/T3).
+- Never rebase, force-push, merge or push. `fx ship` pushes, after the build.
 - The spec decides what "done" means for the build session. Make every acceptance check concrete and runnable.
 - If the issue is too big for one PR, list slices under `## Slices` and shape only the first. Each slice is one
   issue and one PR.

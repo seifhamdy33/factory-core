@@ -93,10 +93,9 @@ def repo_entry(key, prs, wts=None, approver="the-approver"):
     return {"key": key, "cfg": cfg, "repo": f"o/{key}", "prs": prs, "wts": wts or {}}
 
 
-def pr(n, head, state="OPEN", draft=False, labels=(), integrity=None, repo="api"):
-    roll = [{"context": "factory/integrity", "state": integrity}] if integrity else []
-    return {"number": n, "url": f"https://github.com/o/{repo}/pull/{n}", "isDraft": draft, "state": state,
-            "headRefName": head, "labels": [{"name": x} for x in labels], "statusCheckRollup": roll}
+def pr(n, head, state="OPEN", labels=(), repo="api"):  # the PR_FIELDS fx reads
+    return {"number": n, "url": f"https://github.com/o/{repo}/pull/{n}", "state": state, "headRefName": head,
+            "labels": [{"name": x} for x in labels]}
 
 
 class Waiting(FactoryTest):
@@ -120,16 +119,15 @@ class Waiting(FactoryTest):
     def test_ShipFailedWaitingItem(self):
         blocked = self.wt("9", branch="f/9-b")
         write(blocked["path"] / ".factory" / "work" / "9" / "progress.md", "# p\n\n## Blocker\nneeds a key\n")
-        r = repo_entry(None, [pr(1, "f/1-a", draft=True), pr(2, "f/2-b", draft=True, labels=["spec-approved"], integrity="SUCCESS"),
-                              pr(3, "f/3-c", draft=True, labels=["spec-approved"], integrity="FAILURE"),
-                              pr(4, "f/4-d", draft=True, labels=["spec-approved"]),  # gates not posted yet
+        r = repo_entry(None, [pr(1, "f/1-a", labels=["tier:T3"]), pr(2, "f/2-b", labels=["tier:T3", "spec-approved"]),
+                              pr(3, "f/3-c", labels=["tier:T2"]),  # T3 only: a T2 PR needs no approval label
                               pr(6, "feature/not-factory"), pr(7, "f/7-m", state="MERGED")],
                        {"8": self.wt("8", branch="f/8-a", ship="failed:unit,lint"), "9": blocked,
                         "7": self.wt("7", branch="f/7-m", pr="https://github.com/o/api/pull/7")})
         self.assertEqual(fx.waiting([r]), [
             "as the-approver, add `spec-approved`: https://github.com/o/api/pull/1",
-            "as the-approver, add `spec-approved`: https://github.com/o/api/pull/3",
-            "as the-approver, add `spec-approved`: https://github.com/o/api/pull/4",
+            "review/merge: https://github.com/o/api/pull/2",
+            "review/merge: https://github.com/o/api/pull/3",
             "`fx clean 7`",
             "8: ship failed at unit,lint. Next: `fx build 8`",
             f"unblock: {blocked['path'] / '.factory' / 'work' / '9' / 'progress.md'}"])
@@ -192,38 +190,20 @@ class Flows(FactoryTest):
 
     OK = {"ok": True, "failed": [], "reason": "ok", "tail": "", "lines": [], "seconds": 1.0, "over_budget": False}
 
-    def test_DraftToReady(self):
+    def test_ShipUpdatesOpenPr(self):
         _, wt, ctx = self.worktree()
         write(ctx["work"] / "packet.md", PACKET)
-        fake = FakeRun({"gh pr list": [{"number": 12, "url": "https://github.com/o/r/pull/12", "isDraft": True}]})
+        fake = FakeRun({"gh pr list": [{"number": 12, "url": "https://github.com/o/r/pull/12"}]})
         code, out, err, _ = self.fx_in(wt, fake, "ship", "7", verify=self.OK)
         self.assertEqual(code, 0, err)
         self.assertTrue(fake.has("git", "push", "-u", "origin", "f/7-add-thing"))
         self.assertTrue(fake.has("gh", "pr", "edit", "12", "-R", "o/r", "--body-file"))
-        self.assertTrue(fake.has("gh", "pr", "ready", "12", "-R", "o/r"))
         self.assertFalse(fake.has("gh", "pr", "create"))
         self.assertTrue(any("ledger.py" in c[1] and "append" in c for c in fake.calls))
         self.assertEqual((ctx["work"] / "pr_body.md").read_text("utf-8"), PACKET + "\nCloses #7\n")
         st = fl.load_json(ctx["work"] / "state.json")
         self.assertEqual((st["ship"], st["pr"]), ("ok", "https://github.com/o/r/pull/12"))
         self.assertIn("Next: wait for CI", out)
-
-    def test_DraftCreatesPr(self):
-        _, wt, ctx = self.worktree(tier=2)
-        code, _, err, _ = self.fx_in(wt, FakeRun({"gh pr list": []}), "ship", "--draft")  # no spec yet: no dead link
-        self.assertEqual(code, 1)
-        self.assertIn("no spec with id = 7 under docs/specs\nNext: /factory:shape 7", err)
-        write(wt / "docs" / "specs" / "7-add-thing.md", "+++\nid = 7\ntier = 2\n+++\n## Goal\nx\n")
-        fake = FakeRun({"gh pr list": [], "gh issue view": {"title": "Add thing"},
-                        "gh pr create": "Creating...\nhttps://github.com/o/r/pull/13"})
-        code, out, err, _ = self.fx_in(wt, fake, "ship", "--draft")
-        self.assertEqual(code, 0, err)
-        create = next(c for c in fake.calls if c[:3] == ["gh", "pr", "create"])
-        self.assertEqual(create[-3:], ["--label", "tier:T2", "--draft"])
-        self.assertIn("Spec awaiting approval: https://github.com/o/r/blob/f/7-add-thing/docs/specs/7-add-thing.md",
-                      (ctx["work"] / "pr_body.md").read_text("utf-8"))
-        self.assertNotIn("ship", fl.load_json(ctx["work"] / "state.json"))
-        self.assertIn("add label spec-approved; then fx build 7", out)
 
     def test_ShipRefusesBadPacketAndRedVerify(self):
         _, wt, ctx = self.worktree()
@@ -269,34 +249,19 @@ class Flows(FactoryTest):
         self.assertEqual((ctx["work"] / "intent.md").read_text("utf-8"), "# Fix typo\n\nIn the README.\n")
         self.assertEqual(fl.load_json(ctx["work"] / "state.json")["tier"], 0)
 
-    def test_BuildT2NeedsPin(self):
+    def test_BuildT2NeedsOnlyASpec(self):  # D23: no approval before the build; a T3 spec is approved on the PR
         main, wt, ctx = self.worktree(tier=2)
-        write(wt / "docs" / "specs" / "7-add-thing.md", "+++\nid = 7\ntier = 2\n+++\n## Goal\nx\n")
-        fake = FakeRun({"gh issue view": {"title": "t", "labels": [{"name": "tier:T2"}], "body": ""},
-                        "gh pr list": [{"number": 12, "url": "https://github.com/o/r/pull/12", "isDraft": True}]})
-        with mock.patch.object(fx, "pin_ok", return_value=False) as pin:
-            code, _, err, launch = self.fx_in(main, fake, "build", "7")
+        fake = FakeRun({"gh issue view": {"title": "t", "labels": [{"name": "tier:T2"}], "body": ""}})
+        code, _, err, launch = self.fx_in(main, fake, "build", "7")
         self.assertEqual(code, 1)
-        pin.assert_called_once_with(mock.ANY, 12, "docs/specs/7-add-thing.md")
-        self.assertIn("Next: as the approver, add label spec-approved on https://github.com/o/r/pull/12", err)
+        self.assertIn("T2 needs a spec file under docs/specs with id = 7\nNext: fx shape 7", err)
         launch.assert_not_called()
-        with mock.patch.object(fx, "pin_ok", return_value=True):
-            code, _, err, launch = self.fx_in(main, fake, "build", "7")
+        write(wt / "docs" / "specs" / "7-add-thing.md", "+++\nid = 7\ntier = 2\n+++\n## Goal\nx\n")
+        code, _, err, launch = self.fx_in(main, fake, "build", "7")
         self.assertEqual(code, 0, err)
+        self.assertFalse(fake.has("gh", "pr", "list"))  # no pin lookup
         self.assertIn("run `/code-review medium`", launch.call_args.args[1])
         self.assertEqual(fl.load_json(ctx["work"] / "state.json")["tier"], 2)
-
-    def test_PinOkComparesLatestPin(self):
-        _, wt, ctx = self.worktree()
-        write(wt / "docs" / "specs" / "s.md", "spec\n")
-        blob = fl.git(wt, "hash-object", "docs/specs/s.md")
-        ctx["cfg"]["authority"]["approver"] = "boss"
-        pins = [{"pin": {"pr": 12, "spec": "docs/specs/s.md", "blob": blob, "by": "boss"}},
-                {"pin": {"pr": 99, "spec": "x", "blob": "x", "by": "x"}}]
-        with mock.patch.object(fx, "run", return_value="tok"), mock.patch.object(fx.gates, "collect_pins", return_value=pins):
-            self.assertTrue(fx.pin_ok(ctx, 12, "docs/specs/s.md"))
-            pins.append({"pin": {"pr": 12, "spec": "docs/specs/s.md", "blob": "old", "by": "boss"}})
-            self.assertFalse(fx.pin_ok(ctx, 12, "docs/specs/s.md"))
 
     def remote_head(self, main, branch="main"):  # as `git clone` leaves it: origin/HEAD -> the default branch
         git(main, "update-ref", f"refs/remotes/origin/{branch}", "HEAD")

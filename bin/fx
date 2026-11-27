@@ -10,7 +10,7 @@ sys.path[:0] = [str(CORE / "plugins" / "factory" / "lib"), str(CORE / "ci")]
 import factory_lib as fl  # noqa: E402
 import gates, tier  # noqa: E402
 
-LABEL, PR_FIELDS = gates.LABEL, "number,url,isDraft,state,headRefName,labels,statusCheckRollup"
+LABEL, PR_FIELDS = gates.LABEL, "number,url,state,headRefName,labels"
 
 class Refused(Exception):
     pass
@@ -83,14 +83,8 @@ def spec_file(root, cfg, n):  # the spec under specs_dir whose frontmatter id ==
             continue
 
 def open_pr(w):
-    prs = gh_json("pr", "list", "-R", w["repo"], "--head", w["branch"], "--state", "open", "--json", "number,url,isDraft")
+    prs = gh_json("pr", "list", "-R", w["repo"], "--head", w["branch"], "--state", "open", "--json", "number,url")
     return (prs or [None])[0]
-
-def pin_ok(w, pr_number, spec):  # the latest factory-pin for this PR is by the approver for this exact blob
-    pins = [p["pin"] for p in gates.collect_pins(gates.Api(w["repo"], run(["gh", "auth", "token"])))
-            if p["pin"].get("pr") == pr_number]
-    want = {"spec": spec, "blob": fl.git(w["root"], "hash-object", spec), "by": w["cfg"]["authority"]["approver"]}
-    return bool(pins) and all(pins[-1].get(k) == v for k, v in want.items())
 
 def launch(cwd, prompt, phase):  # the user's own model, effort and settings: fx passes no flags (D23)
     print(f"Launching claude in {cwd}. A new worktree shows the trust prompt once: accept it.")
@@ -140,15 +134,8 @@ def cmd_build(a):
     iss = gh_json("issue", "view", n, "-R", w["repo"], "--json", "title,labels,body")
     spec = spec_file(wt, cfg, n)
     t = max(label_tier(iss["labels"], w["state"].get("tier", 1)), tier.tier_num(spec and fl.load_spec(wt / spec)[0].get("tier")) or 0)
-    if t >= 2:
-        if not spec:
-            refuse(f"T{t} needs a spec file under {cfg['specs_dir']} with id = {n}", f"fx shape {ref}")
-        pr = open_pr(w)
-        if not pr or not pin_ok(w, pr["number"], spec):
-            where = pr["url"] if pr else f"the draft PR (fx ship {n} --draft)"
-            refuse(f"{spec} has no approval pin matching its current content",
-                   f"as {cfg['authority']['approver'] or 'the approver'}, add label {LABEL} on {where}, then fx build {ref}")
-        spec_path = spec
+    if t >= 2:  # a T3 spec is approved on the PR (I7), not before the build
+        spec_path = spec or refuse(f"T{t} needs a spec file under {cfg['specs_dir']} with id = {n}", f"fx shape {ref}")
     elif t == 1:
         spec_path = f"{rel}/spec.md"  # always rewritten: the issue's block is the T1 spec
         block = fl.extract_block(iss["body"]) or refuse(f"issue #{n} has no factory:spec block", f"fx shape {ref}")
@@ -178,44 +165,34 @@ def cmd_verify(a):
 def cmd_ship(a):
     w, n, _ = worktree_ctx(a.id)
     cfg, work, t, stage = w["cfg"], w["work"], int(w["state"].get("tier", 1)), "packet"
-    who, pr = cfg["authority"]["approver"] or "the approver", open_pr(w)
+    pr = open_pr(w)
     try:
-        if a.draft:
-            if not (spec := spec_file(w["root"], cfg, n)):
-                refuse(f"no spec with id = {n} under {cfg['specs_dir']}", f"/factory:shape {n} writes and commits it")
-            body =(f"Spec awaiting approval: https://github.com/{w['repo']}/blob/{w['branch']}/{spec}. "
-                    f"Next: as {who}, add label {LABEL}.\n")
-        else:
-            text = (work / "packet.md").read_text("utf-8") if (work / "packet.md").is_file() else ""
-            if probs := (fl.packet_check(text, cfg, t) if text else ["no packet.md"]):
-                refuse(f"{work / 'packet.md'}: " + "; ".join(probs), f"fix packet.md, then fx ship {n}")
-            fl.save_state(w, ship="running")
-            res = fl.run_verify(w, "full")
-            fl.log("fx_ship", w, decision="ship" if res["ok"] else "refuse", reason=res["reason"], verify_ok=res["ok"])
-            if not res["ok"]:
-                stage = ",".join(res["failed"])
-                refuse(f"verify --full failed ({res['reason']}: {stage})\n{res['tail']}", f"fix it, then fx ship {n}")
-            body, stage = text.rstrip() + "\n", "push"
+        text = (work / "packet.md").read_text("utf-8") if (work / "packet.md").is_file() else ""
+        if probs := (fl.packet_check(text, cfg, t) if text else ["no packet.md"]):
+            refuse(f"{work / 'packet.md'}: " + "; ".join(probs), f"fix packet.md, then fx ship {n}")
+        fl.save_state(w, ship="running")
+        res = fl.run_verify(w, "full")
+        fl.log("fx_ship", w, decision="ship" if res["ok"] else "refuse", reason=res["reason"], verify_ok=res["ok"])
+        if not res["ok"]:
+            stage = ",".join(res["failed"])
+            refuse(f"verify --full failed ({res['reason']}: {stage})\n{res['tail']}", f"fix it, then fx ship {n}")
+        stage = "push"
         run(["git", "push", "-u", "origin", w["branch"]], w["root"])
-        (work / "pr_body.md").write_text(f"{body}\nCloses #{n}\n", "utf-8")
+        (work / "pr_body.md").write_text(f"{text.rstrip()}\n\nCloses #{n}\n", "utf-8")
         bf, repo = ["--body-file", work / "pr_body.md"], ["-R", w["repo"]]
-        if pr and not a.draft:  # a draft PR goes ready: the pin artifact stays valid
+        if pr:
             run(["gh", "pr", "edit", pr["number"], *repo, *bf], w["root"])
-            if pr["isDraft"]:
-                run(["gh", "pr", "ready", pr["number"], *repo], w["root"])
         title = None if pr else gh_json("issue", "view", n, *repo, "--json", "title")["title"]
         url = pr["url"] if pr else run(["gh", "pr", "create", *repo, "--head", w["branch"], "--title", title, *bf,
-                                        "--label", f"tier:T{t}", *(["--draft"] if a.draft else [])], w["root"]).splitlines()[-1]
+                                        "--label", f"tier:T{t}"], w["root"]).splitlines()[-1]
     except Refused:
-        if not a.draft:
-            fl.save_state(w, ship=f"failed:{stage}")
+        fl.save_state(w, ship=f"failed:{stage}")
         raise
-    fl.save_state(w, pr=url, **({} if a.draft else {"ship": "ok"}))
-    if not a.draft:
-        ledger(w, url)
+    fl.save_state(w, pr=url, ship="ok")
+    ledger(w, url)
     print(url)
-    print(f"Next: as {who}, review the spec on {url} and add label {LABEL}; then fx build {n}" if a.draft
-          else "Next: wait for CI; fx lists the PR under Waiting on you.")
+    print(f"Next: as {cfg['authority']['approver'] or 'the approver'}, review the spec on {url} and add label {LABEL}."
+          if t >= 3 else "Next: wait for CI; fx lists the PR under Waiting on you.")
 
 def cmd_ledger(a):
     ctx = fl.repo_ctx(".")
@@ -277,11 +254,8 @@ def waiting(repos):  # the "Waiting on you" list; approver and order come from c
         for p in r["prs"]:
             if p["state"] != "OPEN" or not fl.parse_issue(r["cfg"]["branch"], p["headRefName"]):
                 continue
-            if p["isDraft"]:  # a valid pin shows as factory/integrity SUCCESS (I7 runs at T2+)
-                pinned = any(c.get("context") == "factory/integrity" and c.get("state") == "SUCCESS"
-                             for c in p.get("statusCheckRollup") or [])
-                if not pinned or LABEL not in {lb["name"] for lb in p["labels"]}:
-                    out.append(f"as {who}, add `{LABEL}`: {p['url']}")
+            if "tier:T3" in (labels := {lb["name"] for lb in p["labels"]}) and LABEL not in labels:  # T3: approval at the PR
+                out.append(f"as {who}, add `{LABEL}`: {p['url']}")
                 continue
             par = (by_head.get(p["headRefName"]) or {}).get("parent")
             dep = r is not first and par and next((w["state"]["pr"] for w in first["wts"].values()
@@ -315,7 +289,7 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="fx", description="factory CLI (Phase 1, local only)")
     sub = p.add_subparsers(dest="cmd")
     for name, pos, flags in (("status", [], []), ("shape", ["ref"], []), ("build", ["ref"], []), ("clean", ["ref"], []),
-                             ("verify", [], ["--fast", "--full"]), ("ship", ["id?"], ["--draft"])):
+                             ("verify", [], ["--fast", "--full"]), ("ship", ["id?"], [])):
         sp = sub.add_parser(name)
         for x in pos:
             sp.add_argument(x.rstrip("?"), nargs="?" if x.endswith("?") else None)

@@ -54,7 +54,8 @@ class Skills(unittest.TestCase):
         text = (SKILLS / "shape" / "SKILL.md").read_text("utf-8")
         self.assertIn("Never include the spec file itself.", text)
         self.assertIn("Parent: <workspace owner/repo>#<n>", text)  # fx reads this line for the parent link
-        self.assertIn("fx ship <n> --draft", text)
+        self.assertNotIn("--draft", text)  # D23: shape never pushes; a T3 spec is approved on the PR
+        self.assertIn("Next: fx build <ref>", text)
 
 
 if __name__ == "__main__":
