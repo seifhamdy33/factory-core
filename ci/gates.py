@@ -139,10 +139,9 @@ def comment_body(t, reasons, flags, notes):
     out += ["", "**Notes:**", *[f"- {n}" for n in notes]] if notes else []
     return MARKER + "\n" + esc("\n".join(out))
 
-def gates(api, env, ev, extra_pin=None, notes=()):
-    n = ev["pull_request"]["number"]
+def assess(api, n, extra_pin=None, notes=(), coverage=None, allow_head=True):  # the gates and the merger (G1: coverage)
     pr = api.get(f"pulls/{n}")
-    cfg, cfg_notes = load_cfg(api, pr)
+    cfg, cfg_notes = load_cfg(api, pr, allow_head)
     files = api.get_all(f"pulls/{n}/files")
     pr = pr | {"files": files, "files_truncated": len(files) >= 3000 or int(pr.get("changed_files") or 0) > len(files)}
     issue_n, notes = issue_of(pr), [*notes, *cfg_notes]
@@ -159,11 +158,14 @@ def gates(api, env, ev, extra_pin=None, notes=()):
     declared = max([tier.tier_num(lb[5:]) or 0 for lb in labels] + [tier.tier_num(spec and spec["meta"].get("tier")) or 0])
     events = {"tier": None, "declared": declared, "issue": issue_n, "spec_blob": blob,
               "compare": api.get(f"compare/{q(sc)}...{pr['head']['sha']}") if sc else None}
-    t, reasons = tier.compute(files, cfg, integrity.check(pr, spec, cfg, events), declared)
+    t, reasons = tier.compute(files, cfg, integrity.check(pr, spec, cfg, events), declared, coverage and coverage(cfg, pr))
     if declared >= 3:  # only I7 reads these (D23)
         events |= {"label_events": api.get_all(f"issues/{n}/events"),
                    "pins": collect_pins(api, [extra_pin] if extra_pin else [])}
-    flags = integrity.check(pr, spec, cfg, events | {"tier": t})
+    return pr, cfg, t, reasons, integrity.check(pr, spec, cfg, events | {"tier": t}), notes
+
+def gates(api, env, ev, extra_pin=None, notes=()):
+    pr, _, t, reasons, flags, notes = assess(api, n := ev["pull_request"]["number"], extra_pin, notes)
     head, fails = pr["head"]["sha"], [f.code for f in flags if f.kind == "fail"]
     url = f"{env.get('GITHUB_SERVER_URL', 'https://github.com')}/{api.repo}/actions/runs/{env.get('GITHUB_RUN_ID', '')}"
     for ctx, state, desc in (("factory/integrity", "failure" if fails else "success",

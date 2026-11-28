@@ -15,7 +15,8 @@ DEFAULTS = {
     "tiers": {"docs_globs": ["docs/**", "**/*.md"], "sensitive": [], "gate_extra": []},
     "integrity": {"threshold_globs": ["**/jest.config.*", "**/vitest.config.*", "**/.eslintrc*", "**/eslint.config.*",
                                       "**/tsconfig*.json", "**/.coveragerc", "**/.nycrc*"]},
-    "authority": {"approver": ""},
+    "authority": {"approver": "", "auto_merge_ceiling": 0, "agents": []}, "coverage": {"artifact": "coverage",
+                                                                                  "path": "lcov.info", "changed_lines_min": 80},
     "packet": {"max_lines": 40, "extra": [], "headings": dict(zip(PACKET_KEYS, (
         "## Intent", "## Acceptance checks", "## What changed", "## Needs you", "## Not verified", "## Rollback")))},
 }
@@ -37,8 +38,17 @@ def merge(base, over) -> dict:  # dicts merge recursively; any other value in `o
         out[k] = merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
     return out
 
-def load_cfg_text(text, project=""):  # project: the overlay's, else the repo name
-    return merge(DEFAULTS | {"project": project}, tomllib.loads(text))
+WIDEN = (("", "tests"), ("tiers", "sensitive"), ("tiers", "gate_extra"), ("integrity", "threshold_globs"))  # G5: unioned
+CLAMP = ((("packet", "max_lines"), min, 40), (("coverage", "changed_lines_min"), max, 80), (("authority", "auto_merge_ceiling"), min, 1))
+
+def load_cfg_text(text, project=""):  # project: the overlay's, else the repo name. G5: an overlay never weakens a check
+    cfg = merge(DEFAULTS | {"project": project}, tomllib.loads(text))  # docs_globs only narrows: tier.py needs both
+    for sec, key in WIDEN:  # "" = top level
+        d, core = (cfg[sec], DEFAULTS[sec]) if sec else (cfg, DEFAULTS)
+        d[key] = list(dict.fromkeys([*core[key], *(d[key] if isinstance(d[key], list) else [])]))
+    for (sec, key), keep, limit in CLAMP:  # a non-number falls back to the core default
+        cfg[sec][key] = keep(v, limit) if isinstance(v := cfg[sec][key], (int, float)) else DEFAULTS[sec][key]
+    return cfg
 
 def user_cfg():
     p = home() / "config.toml"
