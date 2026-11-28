@@ -27,9 +27,10 @@ class FakeRun:
     def __init__(self, gh=None, fake_git=("push", "fetch")):
         self.gh, self.fake_git, self.calls = {"gh api user": "owner", **(gh or {})}, fake_git, []
 
-    def __call__(self, cmd, cwd=None):
+    def __call__(self, cmd, cwd=None, env=None):
         cmd = [str(c) for c in cmd]
         self.calls.append(cmd)
+        self.envs = getattr(self, "envs", []) + [env]
         if cmd[0] == "gh":
             key = next((k for k in self.gh if " ".join(cmd).startswith(k)), None)
             val = self.gh.get(key, "")
@@ -190,13 +191,15 @@ class Flows(FactoryTest):
         _, wt, ctx = self.worktree()
         write(ctx["work"] / "packet.md", PACKET)
         fake = FakeRun({"gh pr list": [{"number": 12, "url": "https://github.com/o/r/pull/12"}]})
-        code, out, err, _ = self.fx_in(wt, fake, "ship", "7", verify=self.OK)
+        code, out, err, _ = self.fx_in(wt, fake, "ship", "7", verify=self.OK | {"lines": ["factory-verify: lint PASS 2s"]})
         self.assertEqual(code, 0, err)
         self.assertTrue(fake.has("git", "push", "-u", "origin", "f/7-add-thing"))
         self.assertTrue(fake.has("gh", "pr", "edit", "12", "-R", "o/r", "--body-file"))
         self.assertFalse(fake.has("gh", "pr", "create"))
         self.assertTrue(any("ledger.py" in c[1] and "append" in c for c in fake.calls))
-        self.assertEqual((ctx["work"] / "pr_body.md").read_text("utf-8"), PACKET + "\nCloses #7\n")
+        head = fl.git(wt, "rev-parse", "HEAD")  # D27 (B4): the machine's evidence reaches the PR, not only the packet
+        self.assertEqual((ctx["work"] / "pr_body.md").read_text("utf-8"), PACKET + "\nRecorded by `fx ship` (verify --full at "
+                         f"`{head}`):\n- `factory-verify: lint PASS 2s`\n\nCloses #7\n")
         st = fl.load_json(ctx["work"] / "state.json")
         self.assertEqual((st["ship"], st["pr"]), ("ok", "https://github.com/o/r/pull/12"))
         self.assertIn("Next: wait for CI", out)
@@ -218,6 +221,12 @@ class Flows(FactoryTest):
         self.assertEqual(fl.load_json(ctx["work"] / "state.json")["ship"], "failed:unit")
         self.assertEqual(self.log_lines()[-1]["hook"], "fx_ship")
         self.assertIs(self.log_lines()[-1]["verify_ok"], False)
+        write(wt / "build.log", "untracked output" + chr(10))  # untracked: not a refusal (generated files)
+        write(wt / "src" / "app.py", "x = 2" + chr(10))  # verified, but the push would leave it out
+        code, _, err, _ = self.fx_in(wt, fake, "ship", "7", verify=self.OK)
+        self.assertEqual(code, 1)
+        self.assertIn("uncommitted changes: src/app.py\nNext: commit them, then fx ship 7", err)
+        self.assertFalse(fake.has("git", "push"))
 
     def test_BuildT1PullsSpecBlock(self):
         main, wt, ctx = self.worktree()
@@ -357,6 +366,8 @@ class Flows(FactoryTest):
         self.assertEqual(code, 0, err)
         self.assertEqual([c for c in fake.calls if c[0] == "fx-setup-probe"], [["fx-setup-probe", "--frozen"]])
         self.assertIn("Setting up the worktree: fx-setup-probe --frozen", out)
+        env = fake.envs[[c[0] for c in fake.calls].index("fx-setup-probe")]  # audit A4: install scripts get no token
+        self.assertTrue(env and "PATH" in env and not {"GH_TOKEN", "GITHUB_TOKEN"} & set(env))
         wt = (main / ".." / "demo-worktrees").resolve() / "7-add-the-thing"
         self.assertTrue(fl.load_json(wt / ".factory" / "work" / "7" / "state.json")["setup_done"])
         launch.assert_called_once()
@@ -421,6 +432,7 @@ class Flows(FactoryTest):
             self.assertEqual(bg, [])  # no claude --bg
             self.assertFalse(fake.has("gh", "api", "user"))  # the owner comes from the workflow: app tokens can't read /user
             self.assertFalse(fake.has("git", "worktree"))
+            self.assertFalse(fake.has("git", "fetch"))  # A4: the checkout fetched everything and keeps no credential
             self.assertEqual(fl.git(main, "branch", "--show-current"), "f/7-add-the-thing")  # the action's cwd
             self.assertEqual(nxt.read_text("utf-8"), "/factory:shape 7")
             self.assertIn(f"Next shape prompt written to {nxt}", out)

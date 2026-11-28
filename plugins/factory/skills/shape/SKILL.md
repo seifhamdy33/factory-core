@@ -47,6 +47,6 @@ comment (`gh issue comment <n> --body-file <file>`). Then end your turn. Rename 
 to `## Blocker (resolved)`.
 
 ## Rules
-- Never rebase, force-push, merge or push. `fx ship` pushes, after the build.
+- Never rebase, force-push, merge or push. `fx ship` pushes, after the build. Never add the `spec-approved` label.
 - Make every acceptance check concrete and runnable: the spec decides what "done" means for the build.
 - If the issue is too big for one PR, list slices under `## Slices` in the spec and shape only the first.

@@ -1,5 +1,5 @@
 """Shared by the factory hooks, bin/fx and ci/ (stdlib only, Python >= 3.11)."""
-import contextlib, copy, datetime, hashlib, json, os, re, shutil, signal, subprocess, sys, time
+import contextlib, copy, datetime, hashlib, json, math, os, re, shutil, signal, subprocess, sys, time
 if sys.version_info < (3, 11): raise SystemExit(0)  # noqa: E701 (no tomllib: hooks no-op; fx refuses first, D23)
 import tomllib  # noqa: E402
 from functools import lru_cache
@@ -46,8 +46,11 @@ def load_cfg_text(text, project=""):  # project: the overlay's, else the repo na
     for sec, key in WIDEN:  # "" = top level
         d, core = (cfg[sec], DEFAULTS[sec]) if sec else (cfg, DEFAULTS)
         d[key] = list(dict.fromkeys([*core[key], *(d[key] if isinstance(d[key], list) else [])]))
-    for (sec, key), keep, limit in CLAMP:  # a non-number falls back to the core default
-        cfg[sec][key] = keep(v, limit) if isinstance(v := cfg[sec][key], (int, float)) else DEFAULTS[sec][key]
+    for (sec, key), keep, limit in CLAMP:  # a non-number, a bool, nan or inf falls back to the core default (audit A1)
+        ok = isinstance(v := cfg[sec][key], (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+        cfg[sec][key] = keep(v, limit) if ok else DEFAULTS[sec][key]
+    au = cfg["authority"]
+    au["auto_merge_ceiling"] = max(-1, math.floor(au["auto_merge_ceiling"]))  # a tier: -1 (none), 0 or 1
     return cfg
 
 def user_cfg():
@@ -255,6 +258,5 @@ def packet_check(text, cfg, tier):  # -> list of problems (empty = ok); tier is 
         body = m.group(1).strip() if m else ""
     if tier >= 1 and not body:
         probs.append(f"'Not verified' is empty (under {nv!r})")
-    if tier >= 2 and not re.search(r"^Review: .+, \d+ findings", text, re.M):  # any reviewer the user's setup runs
-        probs.append("T2+ needs a line 'Review: <reviewer>, <n> findings'")
+    # D27 (B2): the `Review:` line is asked for in the packet template, never checked: self-reported text isn't a gate
     return probs

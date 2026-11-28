@@ -201,6 +201,33 @@ class Gates(unittest.TestCase):
         self.assertEqual(st["factory/integrity"], ("success", "ok (0 raising flags)"))
         self.assertEqual(st["factory/tier"][1], "T1: computed T1: 1 files, 4 code lines")
 
+    def test_DeclaredTierNeverDrops(self):  # audit A2: a label swapped down after kickoff still counts at its highest
+        block = SPEC.replace("tier = 2", "tier = 1")
+        files = [{"filename": "src/app.py", "status": "modified", "additions": 3, "deletions": 1, "changes": 4,
+                  "patch": "@@\n-x = 1\n+x = 2\n"}]
+        r = routes(**{"pulls/12": fixture("pr.json") | {"labels": []}, "pulls/12/files": files,
+                      "issues/7": {"labels": [{"name": "tier:T1"}], "body": f"<!-- factory:spec -->\n{block}<!-- /factory:spec -->"},
+                      "issues/7/events": [{"event": "labeled", "label": {"name": "tier:T2"}},
+                                          {"event": "unlabeled", "label": {"name": "tier:T2"}},
+                                          {"event": "labeled", "label": {"name": "tier:T1"}}]})
+        self.assertEqual(self.statuses(self.run_gates(FakeApi(r)))["factory/tier"][1], "T2: declared T2 (issue label or spec) > computed T1")
+
+    def test_AcceptanceLockFindsFirstCommit(self):  # audit A3: the base config's acceptance_glob, the PR's own commits
+        acc = {"filename": "tests/acceptance/test_7_a.py", "status": "added", "additions": 2, "deletions": 0, "changes": 2,
+               "patch": "@@\n+def test_a():\n+    assert f()\n"}
+        commits = [{"sha": "c0" * 20}, {"sha": "c1" * 20}, {"sha": "c2" * 20}]
+        r = routes(**{"pulls/12/files": [*fixture("pr_files.json"), acc], "pulls/12/commits": commits,
+                      f"commits/{'c0' * 20}": {"files": [{"filename": "README.md"}]},
+                      f"commits/{'c1' * 20}": {"files": [{"filename": "tests/acceptance/test_7_a.py"}]},
+                      f"compare/{'c1' * 20}...{HEAD}": {"status": "ahead", "files": [
+                          {"filename": "tests/acceptance/test_7_a.py", "status": "modified"}]}})
+        api = self.run_gates(FakeApi(r))
+        self.assertIn("I1 raise:T2: acceptance tests changed after the commit that added them (c1c1c1c1c1c1)", self.comment(api))
+        r["pulls/12/files"] = fixture("pr_files.json")  # the PR doesn't change them in the end: nothing to lock
+        self.assertNotIn("acceptance tests", self.comment(self.run_gates(FakeApi(r))))
+        r["pulls/12/files"], r["pulls/12/commits"] = [*fixture("pr_files.json"), acc], [{"sha": "d0" * 20}] * 250
+        self.assertIn("I1 raise:T2: could not check the acceptance tests (250+ commits", self.comment(self.run_gates(FakeApi(r))))
+
     def test_NoSpecFails(self):
         pr = fixture("pr.json") | {"body": "No issue link.", "labels": []}
         files = [{"filename": "src/app.py", "status": "modified", "additions": 3, "deletions": 1, "changes": 4,
@@ -241,7 +268,8 @@ class WorkflowFiles(unittest.TestCase):
         self.assertEqual(text.count("id-token: write"), 2)
         self.assertNotIn("\nconcurrency:", text)  # per job: a skipped run (the bot's own comment) can't cancel a queued one
         self.assertEqual(text.count("    concurrency: {group: 'factory-"), 2)
-        self.assertIn("--allowedTools Bash,Read,Write,Glob,Grep,Skill ", text)  # the interview writes issue bodies to a file
+        self.assertIn('--allowedTools "Bash(gh issue:*),Bash(gh label:*),Read,Write,Glob,Grep,Skill"\n', text)  # A4: interview
+        self.assertEqual(text.count("persist-credentials: false"), 2)  # A4: no write token in .git/config for setup scripts
         self.assertNotRegex(text, r"run:.*\$\{\{ *github\.event")  # no event text in a shell line
         self.assertNotIn("secrets.GITHUB_TOKEN", text)
         for ref in re.findall(r"^\s*(?:- )?uses: (\S+)", text, re.M):

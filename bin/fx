@@ -18,8 +18,8 @@ class Refused(Exception):
 def refuse(cause, nxt):
     raise Refused(f"{cause}\nNext: {nxt}")
 
-def run(cmd, cwd=None):
-    r = subprocess.run([str(c) for c in cmd], cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+def run(cmd, cwd=None, env=None):
+    r = subprocess.run([str(c) for c in cmd], cwd=cwd, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode:
         refuse(f"`{' '.join(map(str, cmd[:3]))}` failed: {(r.stderr or r.stdout).strip()[-600:]}", "fix the cause above, then rerun")
     return r.stdout.strip()
@@ -135,7 +135,8 @@ def cmd_shape(a):
     if "workspace" in cfg and "factory:parent" in {lb["name"] for lb in iss["labels"]}:
         refuse(f"#{n} is a workspace parent: /factory:idea split it into slices", "fx shape <key>#<slice> for each slice")
     main = main_root(ctx["root"])
-    run(["git", "fetch", "origin"], main)
+    if not os.environ.get("FACTORY_NEXT"):  # A4: in Actions the checkout fetched it all, and keeps no credential
+        run(["git", "fetch", "origin"], main)
     if not fl.git(main, "rev-parse", "--verify", "--quiet", "origin/HEAD"):  # the default branch, not a hard-coded main
         fl.git(main, "remote", "set-head", "origin", "--auto")
         if not fl.git(main, "rev-parse", "--verify", "--quiet", "origin/HEAD"):
@@ -160,7 +161,8 @@ def cmd_shape(a):
     cmd = shlex.split(cfg["setup"]) if isinstance(cfg["setup"], str) else cfg["setup"]  # an argv list or one string
     if cmd and not w["state"].get("setup_done"):  # once per worktree, e.g. install dependencies
         print(f"Setting up the worktree: {' '.join(cmd)}", flush=True)
-        run([shutil.which(cmd[0]) or cmd[0], *cmd[1:]], wt)  # which: npm/pnpm are .cmd shims on Windows
+        run([shutil.which(cmd[0]) or cmd[0], *cmd[1:]], wt,  # which: npm/pnpm are .cmd shims on Windows; A4: no token
+            {k: v for k, v in os.environ.items() if k not in ("GH_TOKEN", "GITHUB_TOKEN")})
         fl.save_state(w, setup_done=True)
     return launch(w, f"/factory:shape {n}", "shape")
 
@@ -194,7 +196,8 @@ def cmd_build(a):
                   f" Then make the PR's checks pass. If `fx` is not on PATH, run {CORE.as_posix()}/bin/fx. When"
                   " a failure repeats past your setup's limit (3 if none), or the next step is irreversible or needs the"
                   f" owner, write a `## Blocker` section in {notes} with the question, post it as an issue comment, and stop."
-                  " Rename a Blocker the owner has answered to `## Blocker (resolved)`.",
+                  " Rename a Blocker the owner has answered to `## Blocker (resolved)`. Never add the spec-approved"
+                  " label: only the owner approves a spec.",
                   "build")
 
 def cmd_verify(a):
@@ -215,6 +218,8 @@ def cmd_ship(a):
         text = (work / "packet.md").read_text("utf-8") if (work / "packet.md").is_file() else ""
         if probs := (fl.packet_check(text, cfg, t) if text else ["no packet.md"]):
             refuse(f"{work / 'packet.md'}: " + "; ".join(probs), f"fix packet.md, then fx ship {n}")
+        if dirty := fl.git(w["root"], "status", "--porcelain", "-uno"):  # verified, but the push would leave them out
+            refuse("uncommitted changes: " + ", ".join(ln.split(maxsplit=1)[-1] for ln in dirty.splitlines()[:5]), f"commit them, then fx ship {n}")
         fl.save_state(w, ship="running")
         res = fl.run_verify(w, "full")
         fl.log("fx_ship", w, decision="ship" if res["ok"] else "refuse", reason=res["reason"], verify_ok=res["ok"])
@@ -223,7 +228,9 @@ def cmd_ship(a):
             refuse(f"verify --full failed ({res['reason']}: {stage})\n{res['tail']}", f"fix it, then fx ship {n}")
         stage = "push"
         run(["git", "push", "-u", "origin", w["branch"]], w["root"])
-        (work / "pr_body.md").write_text(f"{text.rstrip()}\n\nCloses #{n}\n", "utf-8")
+        ev = "\n".join([f"Recorded by `fx ship` (verify --full at `{fl.git(w['root'], 'rev-parse', 'HEAD')}`):",  # D27 (B4)
+                        *[f"- `{ln}`" for ln in res["lines"]]])
+        (work / "pr_body.md").write_text(f"{text.rstrip()}\n\n{ev}\n\nCloses #{n}\n", "utf-8")
         bf, repo = ["--body-file", work / "pr_body.md"], ["-R", w["repo"]]
         if pr:
             run(["gh", "pr", "edit", pr["number"], *repo, *bf], w["root"])

@@ -139,6 +139,17 @@ def comment_body(t, reasons, flags, notes):
     out += ["", "**Notes:**", *[f"- {n}" for n in notes]] if notes else []
     return MARKER + "\n" + esc("\n".join(out))
 
+def acceptance_lock(api, cfg, n, issue_n, head, files):  # A3: the first PR commit touching the base config's acceptance tests
+    glob = cfg["acceptance_glob"].replace("{issue}", str(issue_n))
+    if not any(fl.any_match([glob], x) for f in files for x in tier.names(f)):
+        return None  # the PR doesn't change them: nothing to lock, and no per-commit calls
+    if len(commits := api.get_all(f"pulls/{n}/commits")) >= 250:  # GitHub lists at most 250
+        return {"glob": glob, "first": None, "compare": None}
+    for c in commits:
+        if any(fl.any_match([glob], x) for f in (api.get(f"commits/{c['sha']}") or {}).get("files", []) for x in tier.names(f)):
+            return {"glob": glob, "first": c["sha"], "compare": api.get(f"compare/{c['sha']}...{head}")}
+    return None
+
 def assess(api, n, extra_pin=None, notes=(), coverage=None, allow_head=True):  # the gates and the merger (G1: coverage)
     pr = api.get(f"pulls/{n}")
     cfg, cfg_notes = load_cfg(api, pr, allow_head)
@@ -154,10 +165,12 @@ def assess(api, n, extra_pin=None, notes=(), coverage=None, allow_head=True):  #
         except ValueError as e:
             notes.append(f"the issue's factory:spec block has invalid TOML frontmatter: {e}")
     sc = spec and spec["meta"].get("spec_commit")
-    labels = [lb["name"] for lb in (issue or {}).get("labels", []) if lb["name"].startswith("tier:")]
+    history = [e["label"] for e in api.get_all(f"issues/{issue_n}/events") if e.get("event") == "labeled"] if issue else []
+    labels = [lb["name"] for lb in [*(issue or {}).get("labels", []), *history] if lb["name"].startswith("tier:")]  # A2
     declared = max([tier.tier_num(lb[5:]) or 0 for lb in labels] + [tier.tier_num(spec and spec["meta"].get("tier")) or 0])
     events = {"tier": None, "declared": declared, "issue": issue_n, "spec_blob": blob,
-              "compare": api.get(f"compare/{q(sc)}...{pr['head']['sha']}") if sc else None}
+              "compare": api.get(f"compare/{q(sc)}...{pr['head']['sha']}") if sc else None,
+              "acc_lock": acceptance_lock(api, cfg, n, issue_n, pr["head"]["sha"], files) if issue_n else None}
     t, reasons = tier.compute(files, cfg, integrity.check(pr, spec, cfg, events), declared, coverage and coverage(cfg, pr))
     if declared >= 3:  # only I7 reads these (D23)
         events |= {"label_events": api.get_all(f"issues/{n}/events"),
