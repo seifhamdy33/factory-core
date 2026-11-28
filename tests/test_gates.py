@@ -260,6 +260,7 @@ class WorkflowFiles(unittest.TestCase):
         self.assertNotIn("checkout", text)
         self.assertNotRegex(text, r"(?m)^\s*(?:- )?run:")  # no shell in the workflow: only the pinned actions run
         self.assertEqual(text.count("${{ steps.app.outputs.token }}"), 1)
+        self.assertIn("permission-issues: write", text)  # else the App's merges leave `Closes #n` issues open
         refs = re.findall(r"^\s*(?:- )?uses: (\S+)", text, re.M)
         self.assertEqual(len(refs), 2)
         for ref in refs:
