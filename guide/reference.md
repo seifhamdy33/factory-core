@@ -30,7 +30,7 @@ workspace.
 | `fx shape <ref>` | Refuses a workspace `factory:parent` issue (shape its slices). Checks intake (G6), creates the branch and worktree from `origin/HEAD`, runs `setup` once, then starts the shape session in the background. Prints `Watch: claude attach <id>`. |
 | `fx build <ref>` | Checks intake again and that a spec exists for T1+ (T1: copies the issue's spec block into the worktree; T0: the issue becomes `intent.md`), then starts a fresh build session in the background. |
 | `fx verify [--fast\|--full]` | Runs `.factory/verify` under the machine-wide slots, locks and timeouts, and records the result. |
-| `fx ship [n]` | Checks the packet, runs `verify --full`, pushes, opens the PR (labelled `tier:T<n>`; the label must exist) or updates its body (packet, then the head SHA and the `verify --full` lines, then `Closes #n`), writes the ledger row. The gates own the PR's tier label after that. |
+| `fx ship [n]` | Checks the packet, refuses uncommitted changes to tracked files, runs `verify --full`, pushes, opens the PR (labelled `tier:T<n>`; the label must exist) or updates its body (packet, then the head SHA and the `verify --full` lines, then `Closes #n`), writes the ledger row. The gates own the PR's tier label after that. |
 | `fx clean <ref>` | Only when GitHub shows the PR merged: updates the ledger row, archives notes and `packet.md`, stops the sessions `fx` started, removes the worktree and branch. |
 | `fx ledger --pr <url>` | Rewrites this worktree's ledger row by hand. |
 
@@ -76,7 +76,8 @@ code. It posts two statuses, sets the `tier:` label and keeps one summary commen
 
 **`factory/tier`** is always green; its description is the tier and the main reason. The tier is the max of the
 declared tier and the computed one. The declared tier is the highest of the issue's `tier:` labels, every `tier:`
-label the issue has ever had (so swapping a label later can't lower it), and the spec's `tier`:
+label the issue has ever had (so swapping a label later can't lower it; a wrong high label means a new issue), and
+the spec's `tier`:
 - only docs globs → T0;
 - code → T1;
 - a dependency manifest (core list in `ci/tier.py` plus `[tiers] deps`), or a raising integrity flag → T2;

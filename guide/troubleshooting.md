@@ -19,6 +19,7 @@
 | `lock-timeout` | Another worktree's verify holds the slot or lock. Wait, or raise `verify_slots` in `~/.factory/config.toml` |
 | `no-verify-script` | The repo has no `.factory/verify`: `fx shape` again (the shape session writes one), or add it in its own reviewed PR |
 | `fx ship`: packet refused | It names the problem: a missing heading, over 40 lines, an empty Not verified (T1+). Fix `packet.md`, rerun `fx ship <n>` |
+| `fx ship`: uncommitted changes | Verify checks the working tree but the push sends only commits. Commit them (or revert them), rerun `fx ship <n>` |
 | Ship failed at a stage | `fx status` names it. Fix and rerun `fx ship <n>`, or `fx build <n>` to resume |
 | I1 "locked files changed" or "`spec_commit` not in history" | The build edited a locked test, or the branch was rebased. Re-shape; never rebase a factory branch (merge the default branch in) |
 | I1 "acceptance tests changed after the commit that added them" (T2) | After a re-shape: expected; review and merge it yourself. Otherwise the build changed a test: revert that change |
