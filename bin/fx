@@ -126,7 +126,7 @@ def cmd_shape(a):
         run(["git", "worktree", "add", wt, branch] if has else ["git", "worktree", "add", "-b", branch, wt, "origin/HEAD"], main)
     m, w = re.search(r"^Parent: (\S+#\d+)\s*$", iss.get("body") or "", re.M), fl.repo_ctx(wt)
     fl.save_state(w, issue=n, repo=repo, branch=branch, worktree=str(wt), parent=m and m.group(1),
-                  phase="shape", tier=label_tier(iss["labels"]))
+                  phase="shape", tier=label_tier(iss["labels"]), fx=(CORE / "bin" / "fx").as_posix())  # shape's PATH fallback
     cmd = shlex.split(cfg["setup"]) if isinstance(cfg["setup"], str) else cfg["setup"]  # an argv list or one string
     if cmd and not w["state"].get("setup_done"):  # once per worktree, e.g. install dependencies
         print(f"Setting up the worktree: {' '.join(cmd)}", flush=True)
@@ -159,9 +159,10 @@ def cmd_build(a):
                   " also a security review. Fix the findings you can demonstrate with a failing test and"
                   f" list the rest under Needs you. Then write {rel}/packet.md from {CORE.as_posix()}/plugins/factory/"
                   f"templates/packet.md using this repo's [packet] headings, with what you exercised, and run `fx ship {n}`."
-                  " Then make the PR's checks pass. When"
+                  f" Then make the PR's checks pass. If `fx` is not on PATH, run {CORE.as_posix()}/bin/fx. When"
                   " a failure repeats past your setup's limit (3 if none), or the next step is irreversible or needs the"
-                  f" owner, write a `## Blocker` section in {notes} with the question, post it as an issue comment, and stop.",
+                  f" owner, write a `## Blocker` section in {notes} with the question, post it as an issue comment, and stop."
+                  " Rename a Blocker the owner has answered to `## Blocker (resolved)`.",
                   "build")
 
 def cmd_verify(a):

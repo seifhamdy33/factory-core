@@ -1,4 +1,5 @@
 import os, subprocess, sys, tempfile, time, unittest
+from unittest import mock
 
 from tests.helpers import FactoryTest, fl, git, write
 
@@ -17,6 +18,30 @@ class Phase(FactoryTest):
         self.assertEqual(fl.phase(fl.repo_ctx(ctx["root"])), "shape")
         fl.save_state(ctx, phase="build")
         self.assertEqual(fl.phase(fl.repo_ctx(ctx["root"])), "build")
+
+    def test_SaveStateKeepsConcurrentWrites(self):  # the stop hook's ctx predates fx ship's pr/ship (dummy #10)
+        ctx = self.ctx()
+        fl.save_state(ctx, phase="build", ship="running")
+        hook, ship = fl.repo_ctx(ctx["root"]), fl.repo_ctx(ctx["root"])
+        fl.save_state(ship, pr="https://example/pr/13", ship="ok")
+        fl.save_state(hook, stop={"blocker_consumed": None})  # loaded before the ship finished
+        st = fl.repo_ctx(ctx["root"])["state"]
+        self.assertEqual((st["pr"], st["ship"], st["stop"], st["phase"]), ("https://example/pr/13", "ok", {"blocker_consumed": None}, "build"))
+        self.assertEqual(hook["state"], st)
+
+    def test_SaveStateRetriesALockedReplace(self):  # Windows: WinError 5 while another process reads state.json
+        ctx, real, calls = self.ctx(), os.replace, []
+        def flaky(a, b):
+            calls.append(a)
+            if len(calls) < 3:
+                raise PermissionError(5, "Access is denied")
+            real(a, b)
+        with mock.patch.object(fl.os, "replace", flaky), mock.patch.object(fl.time, "sleep"):
+            fl.save_state(ctx, ship="ok")
+        self.assertEqual((len(calls), fl.repo_ctx(ctx["root"])["state"]["ship"]), (3, "ok"))
+        with mock.patch.object(fl.os, "replace", side_effect=PermissionError), \
+                mock.patch.object(fl.time, "sleep"), self.assertRaises(PermissionError):
+            fl.save_state(ctx, ship="lost")  # still locked after the wait: fail loudly, never drop the write silently
 
     def test_PhaseT0Build(self):
         ctx = self.ctx()  # T0: no spec at all, only intent.md and state.json written by fx build

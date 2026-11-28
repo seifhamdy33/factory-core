@@ -21,7 +21,7 @@ DEFAULTS = {
 }
 USER_DEFAULTS = {"verify_slots": 2, "lock_wait_s": 300, "session": {"build_note": "", "notes": ".factory/work/{issue}/progress.md"}}
 GATE_FILES = [".claude/**", ".factory/**", ".github/**", "CLAUDE.md", "**/CLAUDE.md", "**/CODEOWNERS"]
-BLOCKER = re.compile(r"^## Block(?:er|ed)\b[^\n]*$(.*?)(?=^## |\Z)", re.M | re.S)  # the owner's `## Blocked` too
+BLOCKER = re.compile(r"^## Block(?:er|ed)\b(?![^\n]*\((?i:resolved)\))[^\n]*$(.*?)(?=^## |\Z)", re.M | re.S)  # `## Blocked` too; not `(resolved)`
 VERIFY_LINE = re.compile(r"^factory-verify: (\S+) (PASS|FAIL) (\d+(?:\.\d+)?)s\s*$", re.M)
 NT = os.name == "nt"
 
@@ -78,12 +78,12 @@ def repo_ctx(cwd):
 def notes_path(ctx):  # the session's handoff notes: the user's `[session] notes` file, else progress.md in the work dir
     return ctx["root"] / user_cfg()["session"]["notes"].replace("{issue}", str(ctx["issue"]))
 
-def save_state(ctx, **updates):
-    ctx["state"].update(updates)
-    ctx["work"].mkdir(parents=True, exist_ok=True)
-    tmp = ctx["work"] / "state.json.tmp"
-    tmp.write_text(json.dumps(ctx["state"], indent=2), "utf-8")
-    os.replace(tmp, ctx["work"] / "state.json")
+def save_state(ctx, **updates):  # fx ship and the stop hook overlap: re-read first, and one tmp file per writer
+    ctx["work"].mkdir(parents=True, exist_ok=True); ctx["state"].update(load_json(ctx["work"] / "state.json", {}), **updates)
+    (tmp := ctx["work"] / f"state.json.{os.getpid()}.tmp").write_text(json.dumps(ctx["state"], indent=2), "utf-8")
+    for wait in [0.05] * 40 + [0]:  # Windows refuses the replace while another process has state.json open: ~2 s
+        try: return os.replace(tmp, ctx["work"] / "state.json")
+        except PermissionError if wait else (): time.sleep(wait)
 
 def extract_block(text):
     m = re.search(r"<!-- factory:spec -->\s*(.*?)\s*<!-- /factory:spec -->", (text or "").replace("\r\n", "\n"), re.S)
