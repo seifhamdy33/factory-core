@@ -239,6 +239,9 @@ class WorkflowFiles(unittest.TestCase):
         self.assertIn("github.event.sender.login == github.repository_owner && !github.event.issue.pull_request", text)
         self.assertEqual(text.count("contains(github.event."), 2)  # the interview: the owner's own `@factory` only
         self.assertEqual(text.count("id-token: write"), 2)
+        self.assertNotIn("\nconcurrency:", text)  # per job: a skipped run (the bot's own comment) can't cancel a queued one
+        self.assertEqual(text.count("    concurrency: {group: 'factory-"), 2)
+        self.assertIn("--allowedTools Bash,Read,Write,Glob,Grep,Skill ", text)  # the interview writes issue bodies to a file
         self.assertNotRegex(text, r"run:.*\$\{\{ *github\.event")  # no event text in a shell line
         self.assertNotIn("secrets.GITHUB_TOKEN", text)
         for ref in re.findall(r"^\s*(?:- )?uses: (\S+)", text, re.M):

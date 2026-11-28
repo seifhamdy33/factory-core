@@ -182,8 +182,9 @@ def cmd_build(a):
         (wt / spec_path).write_text(f"# {iss['title']}\n\n{(iss['body'] or '').strip()}\n", "utf-8")
     fl.save_state(w, phase="build", tier=t, spec_path=spec_path)
     notes = p.relative_to(wt).as_posix() if (p := fl.notes_path(w)).is_relative_to(wt) else str(p)  # a user path may sit outside
+    bg = os.environ.get("FACTORY_NEXT") and "in the foreground, subagents too (Bash timeout up to 600000): the run ends at its first wait"
     return launch(w, f"Implement the spec in {spec_path}, unattended: nobody is watching. Keep {notes} current. Run"
-                  " `fx verify --fast` and `fx ship` with the Bash tool's run_in_background, and wait for their result."
+                  " `fx verify --fast` and `fx ship` " + (bg or "with the Bash tool's run_in_background, and wait for their result") + "."
                   " Show the change working the way your setup says, end to end where it is user-facing. Run the reviews"
                   f" your setup requires for T{t}, or for the PR's factory/tier once CI computes a higher one. If it names"
                   " none: at T2 and up one independent review in a fresh context given only the spec and the diff, at T3"

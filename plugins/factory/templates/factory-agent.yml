@@ -13,11 +13,9 @@ on:
   issue_comment:
     types: [created]
 permissions: {}
-concurrency:
-  group: factory-agent-${{ github.event.issue.number }}
-  cancel-in-progress: false
 jobs:
   interview:
+    concurrency: {group: 'factory-interview-${{ github.event.issue.number }}'}  # per job: a skipped job (e.g. the bot's own comment) never waits here
     if: >-
       github.event.sender.login == github.repository_owner && !github.event.issue.pull_request &&
       (github.event.action == 'opened' && contains(github.event.issue.body, '@factory') ||
@@ -32,9 +30,10 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: https://github.com/__FACTORY_CORE_REPO__.git
           plugins: factory@factory-core
-          claude_args: --allowedTools Bash,Read,Glob,Grep,Skill
+          claude_args: --allowedTools Bash,Read,Write,Glob,Grep,Skill  # Write: issue bodies go through a file, not quoting
           prompt: "/factory:idea on GitHub: #${{ github.event.issue.number }}"
   agent:
+    concurrency: {group: 'factory-agent-${{ github.event.issue.number }}'}  # per job: a skipped job (e.g. the bot's own comment) never waits here
     if: github.event.label.name == 'factory' && github.event.sender.login == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 90
