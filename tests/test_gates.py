@@ -241,6 +241,8 @@ class WorkflowFiles(unittest.TestCase):
         for ref in re.findall(r"^\s*(?:- )?uses: (\S+)", text, re.M):
             self.assertRegex(ref, r"@[0-9a-f]{40}$")
         self.assertIn('echo "FACTORY_NEXT=$RUNNER_TEMP/factory-next-prompt" >> "$GITHUB_ENV"', text)  # no `claude --bg`
+        for ph in ("shape", "build"):  # as fx launch sets it: else the shape session's Stop hook verifies as a build
+            self.assertRegex(text, rf"- name: {ph} session\n(?:\s+if: .*\n)?\s+uses: .*\n\s+env: {{FACTORY_PHASE: {ph}}}")
 
     def test_ActionRunsGates(self):
         text = (CORE / "ci" / "action.yml").read_text("utf-8")
