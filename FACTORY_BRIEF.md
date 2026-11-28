@@ -615,6 +615,7 @@ Tasks:
 **Success test:** the first monthly run completes in ≤ 60 minutes of owner time and removes or justifies every prune candidate.
 
 ### Later (not scheduled)
+- Cloud sessions (claude.ai) as a surface: blocked by issue and comment writes (403), GraphQL being blocked, and no scripted fresh-session handoff. The findings and what to try are in `docs/platform-facts.md` > "Phase 1c surfaces". Until then a claude.ai or phone kickoff goes through a GitHub issue.
 - Package the overlay templates and a README for a teammate.
 - The autonomy ratchet: allow T2 auto-merge per repo after ≥ 30 T2 merges in 60 days, with escaped defects no worse than T1, zero rollbacks, and nothing material found in the last 15 owner reviews.
 - Holdout acceptance tests for T3, if integrity checks catch gaming more than once a month.
