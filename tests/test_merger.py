@@ -89,8 +89,9 @@ class Merger(unittest.TestCase):
         self.assertIn("T3 > auto_merge_ceiling T1: computed T3: gate file .github/workflows/factory.yml", out)
 
     def test_MutationScoreCapsTheCeiling(self):  # D26: >= 60 T1, 40-59 T0, < 40 none, no score T0
-        for score, want in (("", "T1 > auto_merge_ceiling T0 (capped by the mutation score)"),
+        for score, want in (("", "T1 > auto_merge_ceiling T0 (no mutation score recorded)"),
                             ("score = 45\n", "T1 > auto_merge_ceiling T0 (capped by the mutation score)"),
+                            ("score = 59.9\n", "T1 > auto_merge_ceiling T0 (capped by the mutation score)"),
                             ("score = 60\n", "merging: T1 <= auto_merge_ceiling T1")):
             with self.subTest(score=score):
                 cfg = f"[authority]\nauto_merge_ceiling = 1\n[mutation]\n{score}"
@@ -100,6 +101,10 @@ class Merger(unittest.TestCase):
         merged, out = self.run_merger(routes([DOC], "[mutation]\nscore = 39\n"))
         self.assertEqual(merged, [])
         self.assertIn("T0 > no auto-merge (mutation score below 40%)", out)
+        self.assertIn("merging: T0 <= auto_merge_ceiling T0", self.run_merger(routes([DOC], "[mutation]\nscore = 40\n"))[1])
+        _, out = self.run_merger(routes([CODE], "[mutation]\nscore = 90\n", pr={"body": "Closes #7"}, extra=T1,
+                                        report="SF:src/app.py\nDA:2,1\nDA:3,1\n"))
+        self.assertIn("T1 > auto_merge_ceiling T0: computed T1", out)  # a score never raises the ceiling
         for bad in ("mutation = 60\n", "[mutation]\nscore = true\n"):  # malformed: T0, never a crash
             with self.subTest(bad=bad):
                 self.assertIn("T0 <= auto_merge_ceiling T0", self.run_merger(routes([DOC], bad))[1])
@@ -111,6 +116,15 @@ class Merger(unittest.TestCase):
         merged, out = self.run_merger(r)
         self.assertEqual(merged, [])
         self.assertIn("T1 > auto_merge_ceiling T0", out)
+
+    def test_HeadScoreIgnored(self):  # base: ceiling 1, score 30; the PR's own config claims 72
+        r = routes([CODE], "[authority]\nauto_merge_ceiling = 1\n[mutation]\nscore = 30\n", pr={"body": "Closes #7"},
+                   report="SF:src/app.py\nDA:2,1\nDA:3,1\n",
+                   extra=T1 | {f"contents/.factory/config.toml?ref={HEAD}": b64("[authority]\nauto_merge_ceiling = 1\n"
+                                                                              "[mutation]\nscore = 72\n")})
+        merged, out = self.run_merger(r)
+        self.assertEqual(merged, [])
+        self.assertIn("T1 > no auto-merge (mutation score below 40%)", out)
 
     def test_EveryConditionHolds(self):
         rows = [  # (routes overrides, expected reason)

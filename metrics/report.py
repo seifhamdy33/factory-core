@@ -125,7 +125,8 @@ def weekly(repo, fs, week):
     out = [f"# factory weekly sample: {repo}, {week} ({len(pick)} of {len(pool)} auto-merged T0/T1)", ""]
     for f in pick:
         mark = OK if OK in f["labels"] else ESCAPED if ESCAPED in f["labels"] else "unmarked"
-        out.append(f"- #{f['n']} {f['title']} (T{f['tier'] or 0}, {mark}): {f['url']}")
+        tier = "T?" if f["tier"] is None else f"T{f['tier']}"
+        out.append(f"- #{f['n']} {f['title']} ({tier}, {mark}): {f['url']}")
     out += ["", f"Mark each after a 2-minute read: `gh pr edit <n> --add-label {OK}` or `--add-label {ESCAPED}`."]
     return "\n".join(out) + "\n"
 
@@ -143,7 +144,9 @@ def main(argv=None, api=None, now=None):
         until = now or dt.datetime.now(dt.timezone.utc)
         since = until - dt.timedelta(days=a.days)
         if a.weekly:
-            y, w = map(int, (a.week or f"{(until - dt.timedelta(weeks=1)):%G-%V}").replace("-W", "-").split("-"))
+            if not re.fullmatch(r"\d{4}-W\d{2}", wk := a.week or f"{(until - dt.timedelta(weeks=1)):%G-W%V}"):
+                ap.error(f"--week {wk}: use YYYY-Www, e.g. 2026-W48")
+            y, w = int(wk[:4]), int(wk[6:])
             since = dt.datetime.combine(dt.date.fromisocalendar(y, w, 1), dt.time(), dt.timezone.utc)
             until = since + dt.timedelta(weeks=1)
         fs = [facts(api, p) for p in closed_prs(api, since, until)]

@@ -25,6 +25,7 @@ def routes():
         pr(2, 1, "2026-11-21T12:00:00Z", body="Closes #9"),  # auto-merged, one commit after opening
         pr(3, 2, "2026-11-22T10:00:30Z", created="2026-11-22T10:00:00Z", body="Fixes #8", labels=("escaped",)),  # human, 30 s after the last commit
         pr(4, 2, None, body="Closes #7"),  # closed unmerged: the gates raised it (declared T1)
+        pr(7, 2, None, title="integrity failed"),  # closed unmerged: factory/integrity failed
         pr(5, 1, "2026-11-23T10:00:00Z", created="2026-11-23T09:30:00Z", title='Revert "pr 2"'),  # change before open,
         # then an update-branch merge commit at 09:45: neither rework nor the start of review
         pr(6, 1, "2026-10-01T10:00:00Z"),  # before the window
@@ -33,7 +34,8 @@ def routes():
          "issues/9": {"created_at": "2026-11-21T00:00:00Z", "labels": [{"name": "tier:T1"}]},
          "issues/8": {"created_at": "2026-11-22T08:00:00Z", "labels": [{"name": "tier:T2"}]},
          "issues/7": {"created_at": "2026-11-20T00:00:00Z", "labels": [{"name": "tier:T1"}]},
-         "commits/sha4/status": {"statuses": [{"context": "factory/integrity", "state": "success"}]}}
+         "commits/sha4/status": {"statuses": [{"context": "factory/integrity", "state": "success"}]},
+         "commits/sha7/status": {"statuses": [{"context": "factory/integrity", "state": "failure"}]}}
     for n, by, commits in ((1, "Bot", ["2026-11-20T09:00:00Z"]), (2, "Bot", ["2026-11-20T09:00:00Z", "2026-11-21T11:00:00Z"]),
                            (3, "User", ["2026-11-22T10:00:00Z"]), (5, "User", ["2026-11-23T09:00:00Z", "merge 2026-11-23T09:45:00Z"])):
         r[f"pulls/{n}"] = {"merged_by": {"type": by}}
@@ -81,7 +83,7 @@ class Report(unittest.TestCase):
         t1 = self.row(text, "T1")  # #2 (rework, reverted by #5, 100 tokens, lead 12 h) and #5 (human, 30 min)
         self.assertEqual(t1, ["T1", "2", "1", "50% (1/2)", "0", "50% (1/2)", "100", "12.0", "30.0", "0", "0 of 2 closed"])
         t2 = self.row(text, "T2")  # #3 escaped, a 30 s human merge (rubber-stamp); #4 raised above its issue's T1
-        self.assertEqual(t2, ["T2", "1", "0", "0% (0/1)", "1", "100% (1/1)", "-", "2.0", "0.5", "1", "1 of 2 closed"])
+        self.assertEqual(t2, ["T2", "1", "0", "0% (0/1)", "1", "100% (1/1)", "-", "2.0", "0.5", "1", "2 of 3 closed"])
         self.assertIn("- G11 sample audit of auto-merged PRs: 1 `audit:ok`, 0 `escaped`, 1 not sampled or unmarked.", text)
         self.assertIn("none recorded (no weekly.csv)", text)
         self.assertIn("issues/404 failed: Not Found (counted as unknown)", self.err)  # one lookup fails, the report runs
@@ -92,6 +94,21 @@ class Report(unittest.TestCase):
         self.assertIn("2026-W47 (1 of 2 auto-merged T0/T1)", text)  # #1 and #2; #3 was a human's, #5 is in W48
         self.assertRegex(text, r"(?m)^- #(1 pr 1 \(T0, audit:ok\)|2 pr 2 \(T1, unmarked\)): https://")
         self.assertIn("(0 of 0 auto-merged T0/T1)", self.run_report("--weekly", "--week", "2026-W48"))
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            report.main(["--repo", "o/r", "--weekly", "--week", "2026W48"], api=fake_api(routes()), now=NOW)
+        self.assertIn("use YYYY-Www", err.getvalue())
+
+    def test_EscapedAuditAndWeeklyCsv(self):
+        r = routes()
+        r["pulls?state=closed&sort=updated&direction=desc&per_page=100&page=1"][1]["labels"].append({"name": "escaped"})
+        (Path(os.environ["FACTORY_HOME"]) / "metrics" / "weekly.csv").write_text(
+            "week,usage_pct\n2026-W40,10\n2026-W47,31\n2026-W48,\n", "utf-8")
+        with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
+            report.main(["--repo", "o/r"], api=fake_api(r), now=NOW)
+        text = out.getvalue()
+        self.assertIn("1 `audit:ok`, 1 `escaped`, 0 not sampled or unmarked.", text)  # #2's audit found a defect
+        self.assertEqual(self.row(text, "T1")[4], "1")
+        self.assertIn("- Weekly /usage %: 2026-W47 31, 2026-W48 -.", text)  # W40 is before the window
 
     def test_WeeklySampleIsSeeded(self):  # G11: 1 in 5, rounded up, the same picks for the same repo and week
         fs = [{"n": n, "title": f"pr {n}", "tier": n % 2, "merged": True, "auto": n != 3, "labels": set(), "url": ""}

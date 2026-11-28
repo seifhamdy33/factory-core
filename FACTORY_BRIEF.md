@@ -567,7 +567,7 @@ Tasks:
 
 ### Phase 3: Onboarding, calibration, metrics (≈ 1–2 days)
 Tasks:
-1. `/factory:onboard` skill: generates the overlay, verify script, trimmed CLAUDE.md, CODEOWNERS and workflow caller. Opens a T3 PR.
+1. `/factory:onboard` skill: generates the overlay, verify script, a few CLAUDE.md lines on running the checks (it doesn't trim the user's CLAUDE.md: D23, D26), the coverage upload and the workflow callers; no CODEOWNERS (D25). Opens a T3 PR.
 2. Mutation sample: run the stack's mutation tool (e.g. mutmut or cosmic-ray for Python, Stryker for TypeScript) on a sample of recently changed modules, capped by time. log-reader summarizes. Record the score in config and propose the ceiling: ≥ 60% → T1; 40–60% → T0; < 40% → no auto-merge.
 3. Onboard the owner's other active repos.
 4. `metrics/report.py`: monthly markdown report per repo and tier, covering throughput, rework rate, escaped defects (`escaped` label + Sentry release attribution), change failure rate, tokens and weekly-% per change, review-time proxy, rubber-stamp signal (T2 approvals < 60 s), lead time and gate yield.

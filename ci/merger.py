@@ -32,14 +32,16 @@ def coverage(api, cfg, pr):
                 continue
     return f"no `{c['artifact']}` artifact holding {c['path']} from a successful pull_request run at {head[:12]}"
 
+def mutation_score(cfg):
+    m = cfg.get("mutation")
+    s = m.get("score") if isinstance(m, dict) else None
+    return s if isinstance(s, (int, float)) and not isinstance(s, bool) else None
+
 def mutation_ceiling(cfg):
     """D26: the recorded mutation score caps the ceiling. >= 60% T1, 40-59% T0, below 40% no auto-merge (-1).
     No score recorded (no /factory:onboard sample yet): T0, which needs no tests."""
-    m = cfg.get("mutation")
-    score = m.get("score") if isinstance(m, dict) else None
-    if not isinstance(score, (int, float)) or isinstance(score, bool):
-        return 0
-    return 1 if score >= 60 else 0 if score >= 40 else -1
+    score = mutation_score(cfg)
+    return 0 if score is None else 1 if score >= 60 else 0 if score >= 40 else -1
 
 def checks_red(api, head):
     """Every check run and commit status on the head must be green, and both factory statuses present."""
@@ -56,7 +58,8 @@ def decide(api, n, owner):
     if capped := (cap := mutation_ceiling(cfg)) < ceiling:
         ceiling = cap
     ceil = ("no auto-merge (mutation score below 40%)" if ceiling < 0 else
-            f"auto_merge_ceiling T{ceiling}" + (" (capped by the mutation score)" if capped else ""))
+            f"auto_merge_ceiling T{ceiling}" + ("" if not capped else " (capped by the mutation score)"
+                                                 if mutation_score(cfg) is not None else " (no mutation score recorded)"))
     if pr.get("state") != "open" or pr.get("draft"):
         why.append("not an open, ready PR")
     if login not in agents:
