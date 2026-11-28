@@ -18,6 +18,16 @@ class Phase(FactoryTest):
         fl.save_state(ctx, phase="build")
         self.assertEqual(fl.phase(fl.repo_ctx(ctx["root"])), "build")
 
+    def test_SaveStateKeepsConcurrentWrites(self):  # the stop hook's ctx predates fx ship's pr/ship (dummy #10)
+        ctx = self.ctx()
+        fl.save_state(ctx, phase="build", ship="running")
+        hook, ship = fl.repo_ctx(ctx["root"]), fl.repo_ctx(ctx["root"])
+        fl.save_state(ship, pr="https://example/pr/13", ship="ok")
+        fl.save_state(hook, stop={"blocker_consumed": None})  # loaded before the ship finished
+        st = fl.repo_ctx(ctx["root"])["state"]
+        self.assertEqual((st["pr"], st["ship"], st["stop"], st["phase"]), ("https://example/pr/13", "ok", {"blocker_consumed": None}, "build"))
+        self.assertEqual(hook["state"], st)
+
     def test_PhaseT0Build(self):
         ctx = self.ctx()  # T0: no spec at all, only intent.md and state.json written by fx build
         write(ctx["work"] / "intent.md", "Fix the typo in README.\n")

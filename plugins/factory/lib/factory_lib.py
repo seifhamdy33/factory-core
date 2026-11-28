@@ -21,7 +21,7 @@ DEFAULTS = {
 }
 USER_DEFAULTS = {"verify_slots": 2, "lock_wait_s": 300, "session": {"build_note": "", "notes": ".factory/work/{issue}/progress.md"}}
 GATE_FILES = [".claude/**", ".factory/**", ".github/**", "CLAUDE.md", "**/CLAUDE.md", "**/CODEOWNERS"]
-BLOCKER = re.compile(r"^## Block(?:er|ed)\b[^\n]*$(.*?)(?=^## |\Z)", re.M | re.S)  # the owner's `## Blocked` too
+BLOCKER = re.compile(r"^## Block(?:er|ed)\b(?![^\n]*(?i:resolved))[^\n]*$(.*?)(?=^## |\Z)", re.M | re.S)  # `## Blocked` too; not `(resolved)`
 VERIFY_LINE = re.compile(r"^factory-verify: (\S+) (PASS|FAIL) (\d+(?:\.\d+)?)s\s*$", re.M)
 NT = os.name == "nt"
 
@@ -79,7 +79,7 @@ def notes_path(ctx):  # the session's handoff notes: the user's `[session] notes
     return ctx["root"] / user_cfg()["session"]["notes"].replace("{issue}", str(ctx["issue"]))
 
 def save_state(ctx, **updates):
-    ctx["state"].update(updates)
+    ctx["state"].update(load_json(ctx["work"] / "state.json", {}), **updates)  # re-read: fx ship and the stop hook overlap
     ctx["work"].mkdir(parents=True, exist_ok=True)
     tmp = ctx["work"] / "state.json.tmp"
     tmp.write_text(json.dumps(ctx["state"], indent=2), "utf-8")

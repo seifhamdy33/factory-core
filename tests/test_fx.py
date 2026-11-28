@@ -236,6 +236,9 @@ class Flows(FactoryTest):
                       " higher one. If it names none: at T2 and up one independent review in a fresh context", prompt)
         self.assertIn("write a `## Blocker` section in .factory/work/7/progress.md", prompt)
         self.assertRegex("## Blocker\nq\n", fl.BLOCKER)  # the heading the prompt names is the one fx detects
+        self.assertIn("rename a blocker the owner has answered to `## blocker (resolved)`", prompt.lower())
+        self.assertNotRegex("## Blocker (resolved)\nq, answered\n## Blocked (Resolved)\nx\n", fl.BLOCKER)
+        self.assertIn(f"If `fx` is not on PATH, run {fx.CORE.as_posix()}/bin/fx.", prompt)  # bg sessions get the service's PATH
         for ch in '<>|&%"':
             self.assertNotIn(ch, prompt)  # claude is a .CMD on Windows
 
