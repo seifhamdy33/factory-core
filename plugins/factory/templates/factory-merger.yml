@@ -26,6 +26,7 @@ jobs:
           private-key: ${{ secrets.MERGER_APP_KEY }}
           permission-contents: write
           permission-pull-requests: write
+          permission-issues: write  # GitHub closes the PR's `Closes #n` issues only when the merging actor may
       - uses: __FACTORY_CORE_REPO__/ci/merge@__FACTORY_CORE_SHA__
         with:
           merge-token: ${{ steps.app.outputs.token }}
