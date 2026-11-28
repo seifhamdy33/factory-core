@@ -65,14 +65,14 @@ class Merger(unittest.TestCase):
     def test_T0Merges(self):  # Phase 2 red-team (e): a genuine T0 PR merges with no human action
         merged, out = self.run_merger(routes([DOC]))
         self.assertEqual(merged, [("pulls/12/merge", {"merge_method": "squash", "sha": HEAD})])
-        self.assertIn("#12 merging: T0 <= T0: computed T0: docs only, 2 lines; changed-line coverage 0/0", out)
+        self.assertIn("#12 merging: T0 <= auto_merge_ceiling T0: computed T0: docs only, 2 lines; changed-line coverage 0/0", out)
 
     def test_T1NeedsCeilingAndCoverage(self):  # G1 before any auto-merge; red-team (h) end to end
         body = {"body": "Closes #7"}
         merged, out = self.run_merger(routes([CODE], pr=body, report="SF:src/app.py\nDA:2,1\nDA:3,1\n", extra=T1))
         self.assertEqual(merged, [])  # the default ceiling is T0
         self.assertIn("T1 > auto_merge_ceiling T0", out)
-        cfg = "[authority]\nauto_merge_ceiling = 1\n"
+        cfg = "[authority]\nauto_merge_ceiling = 1\n[mutation]\nscore = 72\n"
         merged, out = self.run_merger(routes([CODE], cfg, pr=body, report="SF:src/app.py\nDA:2,1\nDA:3,1\n", extra=T1))
         self.assertEqual(len(merged), 1, out)
         merged, out = self.run_merger(routes([CODE], cfg, pr=body, report="SF:src/app.py\nDA:2,1\nDA:3,0\n", extra=T1))
@@ -84,13 +84,26 @@ class Merger(unittest.TestCase):
     def test_RecomputesWithItsOwnCopy(self):  # red-team (d): a green factory/tier from the PR's run counts for nothing
         gate = {"filename": ".github/workflows/factory.yml", "status": "modified", "additions": 1, "deletions": 1,
                 "changes": 2, "patch": "@@ -1 +1 @@\n-a\n+b\n"}
-        merged, out = self.run_merger(routes([DOC, gate], "[authority]\nauto_merge_ceiling = 1\n"))
+        merged, out = self.run_merger(routes([DOC, gate], "[authority]\nauto_merge_ceiling = 1\n[mutation]\nscore = 72\n"))
         self.assertEqual(merged, [])
         self.assertIn("T3 > auto_merge_ceiling T1: computed T3: gate file .github/workflows/factory.yml", out)
 
+    def test_MutationScoreCapsTheCeiling(self):  # D26: >= 60 T1, 40-59 T0, < 40 none, no score T0
+        for score, want in (("", "T1 > auto_merge_ceiling T0 (capped by the mutation score)"),
+                            ("score = 45\n", "T1 > auto_merge_ceiling T0 (capped by the mutation score)"),
+                            ("score = 60\n", "merging: T1 <= auto_merge_ceiling T1")):
+            with self.subTest(score=score):
+                cfg = f"[authority]\nauto_merge_ceiling = 1\n[mutation]\n{score}"
+                _, out = self.run_merger(routes([CODE], cfg, pr={"body": "Closes #7"}, extra=T1,
+                                                report="SF:src/app.py\nDA:2,1\nDA:3,1\n"))
+                self.assertIn(want, out)
+        merged, out = self.run_merger(routes([DOC], "[mutation]\nscore = 39\n"))
+        self.assertEqual(merged, [])
+        self.assertIn("T0 > auto_merge_ceiling T-1 (capped by the mutation score)", out)
+
     def test_HeadConfigIgnored(self):  # main's ceiling, never the PR's: no base config means the core default T0
         r = routes([CODE], pr={"body": "Closes #7"}, report="SF:src/app.py\nDA:2,1\nDA:3,1\n",
-               extra=T1 | {f"contents/.factory/config.toml?ref={HEAD}": b64("[authority]\nauto_merge_ceiling = 1\n")})
+               extra=T1 | {f"contents/.factory/config.toml?ref={HEAD}": b64("[authority]\nauto_merge_ceiling = 1\n[mutation]\nscore = 72\n")})
         del r[f"contents/.factory/config.toml?ref={BASE}"]
         merged, out = self.run_merger(r)
         self.assertEqual(merged, [])
