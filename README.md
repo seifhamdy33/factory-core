@@ -178,7 +178,7 @@ Every refusal prints its cause and a single `Next:` line to follow. To watch a b
 ### Skills
 - `/factory:idea <text>`: the kickoff. Claude also uses it when you explicitly ask for the factory.
 - `/factory:shape <n>`: started by `fx shape`; you don't normally run it.
-- `/factory:onboard`: proposes the overlay, `.factory/verify`, the workflows and an auto-merge ceiling from a mutation sample, as one T3 PR. Rerun it to propose only what changed.
+- `/factory:onboard`: proposes the overlay, `.factory/verify`, the workflows and an auto-merge ceiling from a mutation sample, as one T3 PR with a spec issue: read the spec, add `spec-approved`, merge. Rerun it to propose only what changed.
 
 ## Features
 

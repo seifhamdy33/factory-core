@@ -42,12 +42,17 @@ answer, and give a recommended option.
    runs on pull requests. Ask whether to add `factory-agent.yml` (kick off from GitHub; README section 5).
 6. **CLAUDE.md.** Only if it doesn't say how to run the checks: add 3–5 lines saying so. Change nothing else in it.
 7. **Labels.** Create any missing: `spec-approved`, `hold`, `audit:ok`, `escaped`.
-8. **PR.** On branch `factory/onboard`, one commit, then `gh pr create`. The body holds:
+8. **Spec (I6, I7).** Open an issue "Factory onboarding" with the `tier:T3` label. On the branch, write the spec to
+   `specs_dir`/`spec_name` (defaults `docs/specs/{issue}-{slug}.md`) from `${CLAUDE_PLUGIN_ROOT}/templates/spec.md`:
+   `id` = the issue, `tier = 3`, `scope` = exactly the files the PR changes, `locked = []`, `flag = "none: setup"`;
+   Goal, Non-goals, and an acceptance check `.factory/verify --fast`. Put the spec text in the issue too.
+9. **PR.** On branch `factory/onboard`, one commit, then `gh pr create`, body starting `Closes #<issue>`. It holds:
    - a table of each overlay value with its reason;
    - the verify output and the mutation result (tool, sample, score, ceiling);
    - what only the owner can do: the merger App and `MERGER_CLIENT_ID` (README section 6) when `gh variable list`
      doesn't show it, and a reminder to check the `MERGER_APP_KEY` secret (don't list or read secrets).
-   It changes gate files, so it is T3: the owner reviews and merges it.
+   It changes gate files, so it is T3. The owner reads the spec, adds `spec-approved` to the PR (integrity turns
+   green), and merges it.
 
 ## Rules
 - Never push to the default branch, merge, or change repo settings. Creating labels and issues is allowed.
