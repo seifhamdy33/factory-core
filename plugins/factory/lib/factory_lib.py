@@ -76,7 +76,7 @@ def repo_ctx(cwd):
             "work": work, "state": load_json(work / "state.json", {}) if work else {}}
 
 def notes_path(ctx):  # the session's handoff notes: the user's `[session] notes` file, else progress.md in the work dir
-    return ctx["root"] / user_cfg()["session"]["notes"].format(issue=ctx["issue"])
+    return ctx["root"] / user_cfg()["session"]["notes"].replace("{issue}", str(ctx["issue"]))
 
 def save_state(ctx, **updates):
     ctx["state"].update(updates)

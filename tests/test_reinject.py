@@ -50,6 +50,10 @@ class Reinject(FactoryTest):
         out = self.start(self.build_ctx(), "startup")
         self.assertIn(f", notes {self.home / 'notes-7.md'}.", out)
 
+    def test_NotesWithOtherBraces(self):  # only {issue} is filled in; any other brace stays literal, never a traceback
+        self.user_config('[session]\nnotes = "work/{name}-{issue}.md"\n')
+        self.assertIn(", notes work/{name}-7.md.", self.start(self.build_ctx(), "startup"))
+
     def test_UnderTenThousandChars(self):
         ctx = self.build_ctx(spec="+++\nid = 7\n+++\n## Goal\nSPEC-START\n" + "s" * 30000 + "\nSPEC-END\n")
         write(ctx["work"] / "progress.md", "PROGRESS-START\n" + "p" * 30000 + "\nPROGRESS-LATEST\n")
