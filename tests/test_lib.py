@@ -102,6 +102,25 @@ class Config(unittest.TestCase):
         self.assertEqual(cfg["packet"]["headings"]["rollback"], "## Rollback")
         self.assertEqual(cfg["tiers"]["docs_globs"], ["docs/**", "**/*.md"])
 
+    def test_CoreFloors(self):  # G5: an overlay narrows or adds, it never weakens a check
+        cfg = fl.load_cfg_text('tests = []\n[tiers]\nsensitive = ["src/auth/**"]\ngate_extra = "AGENTS.md"\n'
+                               '[integrity]\nthreshold_globs = []\n[packet]\nmax_lines = 400\n')
+        self.assertEqual(cfg["tests"], fl.DEFAULTS["tests"])
+        self.assertEqual(cfg["tiers"]["sensitive"], ["src/auth/**"])
+        self.assertEqual(cfg["tiers"]["gate_extra"], [])  # not a list: ignored, the core's list stays
+        self.assertEqual(cfg["integrity"]["threshold_globs"], fl.DEFAULTS["integrity"]["threshold_globs"])
+        self.assertEqual(cfg["packet"]["max_lines"], 40)
+        go = fl.load_cfg_text('tests = ["**/*_test.go", "tests/**"]\n[packet]\nmax_lines = 25\n')
+        self.assertEqual(go["tests"], [*fl.DEFAULTS["tests"], "**/*_test.go"])  # added once, after the core's
+        self.assertEqual(go["packet"]["max_lines"], 25)  # stricter is fine
+        self.assertEqual(fl.DEFAULTS["tests"][0], "tests/**")  # the defaults are not mutated
+        lax = fl.load_cfg_text('[coverage]\nchanged_lines_min = 50\n[authority]\nauto_merge_ceiling = 3\n')
+        self.assertEqual((lax["coverage"]["changed_lines_min"], lax["authority"]["auto_merge_ceiling"]), (80, 1))
+        odd = fl.load_cfg_text('[coverage]\nchanged_lines_min = 85.5\n[authority]\nauto_merge_ceiling = "high"\n')
+        self.assertEqual((odd["coverage"]["changed_lines_min"], odd["authority"]["auto_merge_ceiling"]), (85.5, 0))
+        strict = fl.load_cfg_text('[coverage]\nchanged_lines_min = 95\n')
+        self.assertEqual((strict["coverage"]["changed_lines_min"], strict["authority"]["auto_merge_ceiling"]), (95, 0))
+
     def test_ParseIssue(self):
         self.assertEqual(fl.parse_issue("f/{issue}-{slug}", "f/12-add-x"), "12")
         self.assertEqual(fl.parse_issue("{type}/{issue}-{slug}", "fix/3-a"), "3")

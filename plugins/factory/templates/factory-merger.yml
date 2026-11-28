@@ -1,0 +1,31 @@
+name: factory-merger
+# The factory merger (factory-core brief 3.11, D24). workflow_run workflows always run from the default branch, so a
+# PR can't change this file or the pinned core. It reads with GITHUB_TOKEN and merges with the merger App's token,
+# which only the merge step gets. No step checks out or runs PR code.
+on:
+  workflow_run:
+    # The gates and every workflow that runs on pull requests (the CI that uploads the coverage artifact among them).
+    # the merger waits for all checks, and only a listed workflow's completion wakes it again.
+    workflows: [factory, __CI_WORKFLOW__]
+    types: [completed]
+permissions: {}
+concurrency:
+  group: factory-merger-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+jobs:
+  merge:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {contents: read, pull-requests: read, issues: read, checks: read, statuses: read, actions: read}
+    steps:
+      - id: app
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ vars.MERGER_CLIENT_ID }}
+          private-key: ${{ secrets.MERGER_APP_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: __FACTORY_CORE_REPO__/ci/merge@__FACTORY_CORE_SHA__
+        with:
+          merge-token: ${{ steps.app.outputs.token }}

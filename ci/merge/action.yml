@@ -1,0 +1,15 @@
+name: factory merger
+description: >-
+  Squash-merges a PR that is at or under the base branch's auto_merge_ceiling with every check green (brief 3.11,
+  D24). Call it only from a workflow_run workflow on the default branch; it reads the PR through the API, recomputes
+  the tier with this core, and never checks out or runs PR code.
+inputs:
+  merge-token: {description: "the merger App's installation token (the ruleset's only bypass actor)", required: true}
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        MERGE_TOKEN: ${{ inputs.merge-token }}
+      run: python3 "$GITHUB_ACTION_PATH/../merger.py"

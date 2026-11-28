@@ -15,10 +15,11 @@ BUDGETS = {
     "ci/gates.py": 200,
     "ci/tier.py": 200,
     "ci/integrity.py": 200,
+    "ci/merger.py": 120,  # new in Phase 2 (D24), stated to the owner
     "metrics/ledger.py": 150,
 }
 CODE_DIRS = ("ci", "plugins/factory", "bin", "metrics", "user")
-LOCAL_MODULES = {"factory_lib", "gates", "tier", "integrity"}
+LOCAL_MODULES = {"factory_lib", "gates", "tier", "integrity", "merger"}
 PILOT_NAMES = re.compile(r"livlyte|seif-livlyte|seifhamdy")
 
 

@@ -20,7 +20,7 @@ project = "<repo-name>"                       # default: the GitHub repo name
 # full_locks = []                             # e.g. ["docker"] when --full needs the machine's only docker stack
 
 [tiers]
-# docs_globs = ["docs/**", "**/*.md"]
+# docs_globs = ["docs/**", "**/*.md"]          # can only narrow: a file is docs only if the core's globs match too
 # sensitive = []                              # paths that make a change T3
 # gate_extra = []                             # extra gate files (always T3)
 # deps = []                                   # extra dependency manifests (T2), added to the core list in ci/tier.py
@@ -34,9 +34,17 @@ project = "<repo-name>"                       # default: the GitHub repo name
 
 [authority]
 approver = ""                                 # the GitHub login whose spec-approved label counts (declared T3)
+# auto_merge_ceiling = 0                      # the merger (factory-merger.yml) merges up to this tier; at most 1
+# agents = []                                 # PR authors the merger accepts; default: the owner, claude[bot],
+                                              #   factory-agent[bot]
+
+[coverage]                                    # the merger reads it from the repo's CI; missing or low -> T2 (G1)
+# artifact = "coverage"                       # the artifact a successful pull_request run uploads
+# path = "lcov.info"                          # the LCOV file inside it
+# changed_lines_min = 80                      # percent of added code lines covered; can only be raised
 
 [packet]
-# max_lines = 40
+# max_lines = 40                              # at most 40
 # extra = []                                  # extra headings, e.g. ["### Checklist"]
 
 [packet.headings]

@@ -250,6 +250,23 @@ class WorkflowFiles(unittest.TestCase):
         for ph in ("shape", "build"):  # as fx launch sets it: else the shape session's Stop hook verifies as a build
             self.assertRegex(text, rf"- name: {ph} session\n(?:\s+if: .*\n)?\s+uses: .*\n\s+env: {{FACTORY_PHASE: {ph}}}")
 
+    def test_MergerTemplateIsSafe(self):  # templates/factory-merger.yml: holds the merge token (D24)
+        text = (CORE / "plugins" / "factory" / "templates" / "factory-merger.yml").read_text("utf-8")
+        on = text.split("\non:", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual([ln.strip() for ln in on.splitlines() if ln.strip().endswith(":")], ["workflow_run:"])
+        self.assertIn("\npermissions: {}\n", text)
+        self.assertIn("permissions: {contents: read, pull-requests: read, issues: read, checks: read, statuses: read, "
+                      "actions: read}", text)  # GITHUB_TOKEN only reads; the App token merges
+        self.assertNotIn("checkout", text)
+        self.assertNotRegex(text, r"(?m)^\s*(?:- )?run:")  # no shell in the workflow: only the pinned actions run
+        self.assertEqual(text.count("${{ steps.app.outputs.token }}"), 1)
+        refs = re.findall(r"^\s*(?:- )?uses: (\S+)", text, re.M)
+        self.assertEqual(len(refs), 2)
+        for ref in refs:
+            self.assertRegex(ref, r"@([0-9a-f]{40}|__FACTORY_CORE_SHA__)$")
+        action = (CORE / "ci" / "merge" / "action.yml").read_text("utf-8")
+        self.assertIn('run: python3 "$GITHUB_ACTION_PATH/../merger.py"', action)
+
     def test_ActionRunsGates(self):
         text = (CORE / "ci" / "action.yml").read_text("utf-8")
         self.assertIn('run: python3 "$GITHUB_ACTION_PATH/gates.py"', text)
