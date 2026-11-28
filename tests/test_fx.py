@@ -234,6 +234,13 @@ class Flows(FactoryTest):
         self.assertEqual((w["root"], phase), (wt, "build"))
         self.assertTrue(prompt.startswith("Implement the spec in .factory/work/7/spec.md, unattended"))
         self.assertIn("Keep .factory/work/7/progress.md current", prompt)
+        self.assertIn("`fx ship` with the Bash tool's run_in_background, and wait for their result.", prompt)
+        with mock.patch.dict(os.environ, {"FACTORY_NEXT": str(self.tmp / "next")}):  # the Actions run ends at a wait
+            code, _, err, launch = self.fx_in(main, fake, "build", "7")
+        self.assertEqual(code, 0, err)
+        self.assertIn("`fx ship` in the foreground, subagents too (Bash timeout up to 600000): the run ends at its first"
+                      " wait. Show", launch.call_args.args[1])
+        self.assertNotIn("run_in_background", launch.call_args.args[1])
         self.assertIn("Run the reviews your setup requires for T1, or for the PR's factory/tier once CI computes a"
                       " higher one. If it names none: at T2 and up one independent review in a fresh context", prompt)
         self.assertIn("write a `## Blocker` section in .factory/work/7/progress.md", prompt)
