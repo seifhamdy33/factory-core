@@ -65,7 +65,7 @@ def worktrees(ctx):  # {issue: path} for linked worktrees on a branch matching t
     for ln in (fl.git(ctx["root"], "worktree", "list", "--porcelain") or "").splitlines():
         if ln.startswith("worktree "):
             path, first = (Path(ln[9:]), path is None)
-        elif ln.startswith("branch refs/heads/") and not first and (i := fl.parse_issue(ctx["cfg"]["branch"], ln[18:])):
+        elif ln.startswith("branch refs/heads/") and (not first or os.environ.get("FACTORY_NEXT")) and (i := fl.parse_issue(ctx["cfg"]["branch"], ln[18:])):
             out[i] = path
     return out
 
@@ -87,6 +87,8 @@ def open_pr(w):
     return (prs or [None])[0]
 
 def launch(w, prompt, phase):  # returns at once: a background session, the user's own model and settings (D23)
+    if nxt := os.environ.get("FACTORY_NEXT"):  # GitHub Actions (templates/factory-agent.yml): its next step runs this
+        Path(nxt).write_text(prompt, "utf-8"); print(f"Next {phase} prompt written to {nxt}"); return 0
     p = subprocess.run([shutil.which("claude") or "claude", "--bg", prompt], cwd=w["root"], capture_output=True, text=True,
                        encoding="utf-8", errors="replace", env=os.environ | {"FACTORY_PHASE": phase})
     sid = re.search(r"backgrounded\W+([\w-]+)", p.stdout) or refuse(
@@ -106,7 +108,7 @@ EDITS = ("query($o: String!, $r: String!, $n: Int!) { repository(owner: $o, name
          "{ userContentEdits(last: 100) { nodes { editedAt editor { login } } } } } }")  # REST has no body edit history
 
 def intake(repo, n, iss, cfg, cmd):  # G6: act only on the owner's issues, or on ones the owner or approver marked ready
-    me, labels, author = run(["gh", "api", "user", "--jq", ".login"]), {lb["name"] for lb in iss["labels"]}, \
+    me, labels, author = os.environ.get("FACTORY_OWNER") or run(["gh", "api", "user", "--jq", ".login"]), {lb["name"] for lb in iss["labels"]}, \
         (iss.get("author") or {}).get("login") or "someone else"
     if "triage" in labels or author.lower() != me.lower():  # logins are case-insensitive
         who = sorted({me, cfg["authority"]["approver"]} - {""}, key=str.lower)
@@ -145,6 +147,10 @@ def cmd_shape(a):
             f.write("\n.factory/work/\n")
     branch, wname = names(cfg, n, iss["title"], iss["labels"])
     wt = worktrees(ctx).get(n) or (main / cfg["worktree_root"].format(project=cfg["project"])).resolve() / wname
+    if os.environ.get("FACTORY_NEXT"):  # the action runs in the checkout, not a worktree
+        wt = main
+        base = f"origin/{branch}" if fl.git(main, "rev-parse", "--verify", "--quiet", f"origin/{branch}") else "origin/HEAD"
+        if fl.git(main, "branch", "--show-current") != branch: run(["git", "checkout", "-B", branch, base], main)  # a rerun
     if not wt.exists():
         has = fl.git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
         run(["git", "worktree", "add", wt, branch] if has else ["git", "worktree", "add", "-b", branch, wt, "origin/HEAD"], main)
