@@ -128,7 +128,7 @@ The merger merges a PR without you when it is at or under `[authority] auto_merg
 1. Create a GitHub App with **Contents: read and write** and **Pull requests: read and write**, no webhook. Install it on the repo. Store its client ID as the repo variable `MERGER_CLIENT_ID` and a private key as the secret `MERGER_APP_KEY`.
 2. Make the repo's CI (on `pull_request`) upload the LCOV report as the artifact `coverage` holding `lcov.info` (or set `[coverage] artifact` and `path`).
 3. Copy `plugins/factory/templates/factory-merger.yml` to `.github/workflows/factory-merger.yml`. Fill in `__FACTORY_CORE_REPO__` and `__FACTORY_CORE_SHA__` as for the gates, and `__CI_WORKFLOW__` with the `name:` of that CI workflow. List every other workflow that runs on pull requests there too: the merger waits for all checks, and only a listed workflow's completion wakes it.
-4. Add a ruleset on the default branch: require a pull request with a code owner review, require `factory/integrity`, `factory/tier` and the CI checks, require branches to be up to date, block force pushes, and make the App the only bypass actor. Everything above the ceiling then waits for your review.
+4. Optional: a ruleset on the default branch (require a pull request and the `factory/*` and CI checks, block force pushes), with the App as its only bypass actor. The factory doesn't need it: it never merges above the ceiling, and keeping agents from merging is your own Claude Code setup's job. Everything above the ceiling waits for you to merge it.
 
 ## Using it
 

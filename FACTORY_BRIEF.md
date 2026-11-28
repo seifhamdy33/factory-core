@@ -267,9 +267,10 @@ Required checks:
 - Triggered by `workflow_run` (completion of gates) and `pull_request_review`. It runs from the **default branch**, so a PR can't modify it.
 - **It never trusts the PR's own `factory/tier` result.** It recomputes the tier with main's copy of `tier.py` and `integrity.py` against the PR diff fetched through the API. It must never execute PR code.
 - Merges (squash) only if: computed tier ≤ `auto_merge_ceiling` from **main's** config, all required checks green, branch up to date, PR author is the agent identity, no `hold` label.
-- Merges with the merger GitHub App token. The App is a ruleset bypass actor, so it is the only path around the approval requirement.
+- Merges with the merger GitHub App token, so workflows on the default branch (the staging deploy) run on the merge; a GITHUB_TOKEN merge would trigger none. Where the user adds a ruleset (3.12), the App is its bypass actor.
 
-### 3.12 GitHub settings (Phase 2, per repo; ask before changing existing repos)
+### 3.12 GitHub settings (optional hardening, per repo; ask before changing existing repos)
+D25: the factory needs none of these to work, and solo use needs no second account. Restrictions on agents are the user's own Claude Code setup. These are the user's choice for repos that want them.
 - Ruleset on the default branch: require PR; require 1 approval; require the `factory/*` checks; require up to date; block force pushes and deletions; linear history. Bypass: merger App only.
 - "Require review from Code Owners" on; CODEOWNERS = owner for gate files.
 - Environments: `staging` (no reviewer, agent-deployable), `production` (required reviewer: owner; prevent self-review; prod secrets live only here).
@@ -533,10 +534,10 @@ Tasks:
 
 ### Phase 2: Authority and autonomy (≈ 1–2 days)
 Tasks:
-1. Agent identity per `docs/decisions.md`. The factory sets no permission rules (D23); the user's own setup keeps agents from merging until the ruleset is in place.
-2. Move the gate logic into the reusable `ci/gates.yml`; flip integrity, tier, deps, packet and secret scan to **required**.
+1. Agent identity per `docs/decisions.md`: agents act as the owner (D1, D25). The factory sets no permission rules (D23) and needs no second account, scoped token or ruleset (D25); the user's own setup keeps agents from merging.
+2. The gate logic is the composite action `ci/` (D15). Making its checks required is optional hardening (3.12, D25).
 3. Merger workflow (3.11) and merger App.
-4. Ruleset, CODEOWNERS, Environments on the pilot (3.12). Ask first.
+4. Environments on the pilot: `staging`, and `production` with the owner as reviewer and the only prod secrets (3.12). Ruleset and CODEOWNERS are optional (D25). Ask first.
 5. Staging auto-deploy on merge, plus staging smoke.
 6. **G1, changed-line coverage, before any auto-merge.**
    - Add an overlay key for the coverage report, and `[coverage] changed_lines_min` with a core floor of 80.
@@ -554,12 +555,12 @@ Tasks:
 
 **Success test** (red-team PRs opened by the agent identity on the pilot):
 - (a) A PR that deletes an assertion from a locked acceptance test → `factory/integrity` fails.
-- (b) A PR that edits `.claude/settings.json` → computed T3, not auto-merged, needs CODEOWNERS approval.
+- (b) A PR that edits `.claude/settings.json` → computed T3, not auto-merged: it waits for the owner.
 - (c) A PR that adds a brand-new or nonexistent package → flagged, tier ≥ T2.
 - (d) A PR that modifies `ci/tier.py` (or the workflow pin) to return T0, on a T3 diff → the merger still refuses: it recomputes with main's copy.
 - (e) A genuine T0 PR auto-merges with no human action and deploys to staging.
-- (f) An attempt by an agent session to deploy production fails: no credentials, plus an environment reviewer.
-- (g) The agent identity can't approve its own PR or push to `.github/workflows/`.
+- (f) An attempt by an agent session to deploy production fails: no credentials outside the `production` environment, plus its reviewer.
+- (g) Dropped (D25): what an agent may push or approve is the user's own setup, not a factory check.
 - (h) G1: a T1-sized PR that adds an untested branch computes T2 and isn't auto-merged. The same PR with a covering test computes T1.
 - (i) G5: an overlay that sets `docs_globs = ["**"]`, `tests = []` or `threshold_globs = []` weakens nothing. A code change still computes at least T1, and a removed assertion still raises the tier to T2.
 - (j) G6: `fx shape` refuses a `triage` issue until the owner applies `ready`.
