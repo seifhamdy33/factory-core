@@ -179,6 +179,8 @@ def gates(api, env, ev, extra_pin=None, notes=()):
             and (c.get("body") or "").startswith(MARKER)]
     body = {"body": comment_body(t, reasons, flags, notes)}
     api.call("PATCH", f"issues/comments/{mine[0]['id']}", body) if mine else api.call("POST", f"issues/{n}/comments", body)
+    for c in mine[1:]:  # an opened + labeled pair runs at once and both POST: keep the first, drop the stale twin
+        api.call("DELETE", f"issues/comments/{c['id']}")
     return t, flags
 
 def main(env=os.environ, api=None):

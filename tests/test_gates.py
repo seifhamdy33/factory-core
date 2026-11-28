@@ -175,6 +175,13 @@ class Gates(unittest.TestCase):
         self.assertIn("&lt;!-- factory:gates --&gt;@​evil--&gt;x.tf", text)
         self.assertEqual(api.writes("POST", "issues/12/comments"), [])
 
+    def test_DuplicateCommentRemoved(self):  # opened + labeled runs race and both POST; later runs keep one, drop the rest
+        comments = [{"id": 77, "user": {"login": "github-actions[bot]"}, "body": gates.MARKER + "\nold"},
+                    {"id": 78, "user": {"login": "github-actions[bot]"}, "body": gates.MARKER + "\nstale twin"}]
+        api = self.run_gates(FakeApi(routes(**{"issues/12/comments": comments})))
+        self.assertEqual([p for p, _ in api.writes("PATCH", "issues/comments/")], ["issues/comments/77"])
+        self.assertEqual(api.writes("DELETE", "issues/comments/"), [("issues/comments/78", None)])
+
     def test_TierLabelSwapped(self):
         pr = fixture("pr.json")
         pr["labels"] = [{"name": "tier:T1"}, {"name": "spec-approved"}]
