@@ -29,7 +29,7 @@ class Tier(unittest.TestCase):
         self.assertEqual(t, 0)
         self.assertEqual(reasons[0], "computed T0: docs only, 28 lines")
         self.assertEqual(reasons[-1], tier.NOT_EVALUATED)
-        self.assertEqual(tier.compute([f("docs/guide.md", 31)], CFG)[0], 1)  # docs, but > 30 lines
+        self.assertEqual(tier.compute([f("docs/guide.md", 900)], CFG)[0], 0)  # size never raises a tier (D23)
         self.assertEqual(tier.compute([f("docs/guide.md"), f("src/a.py")], CFG)[0], 1)
 
     def test_LockfileRaisesT2(self):
@@ -39,12 +39,15 @@ class Tier(unittest.TestCase):
                 self.assertEqual(t, 2)
                 self.assertIn("dependency manifest", reasons[0])
 
-    def test_SizeLimits(self):
-        self.assertEqual(tier.compute([f("src/a.py", 100, 50)], CFG)[0], 1)  # 150 is not > 150
-        t, reasons = tier.compute([f("src/a.py", 100, 51), f("docs/big.md", 500)], CFG)  # docs lines don't count
-        self.assertEqual((t, reasons[0]), (2, "computed T2: 151 code lines > 150"))
-        self.assertEqual(tier.compute([f(f"src/{i}.py") for i in range(6)], CFG)[0], 1)
-        self.assertEqual(tier.compute([f(f"src/{i}.py") for i in range(7)], CFG)[0], 2)
+    def test_OverlayDepsAreAdded(self):
+        cfg = fl.load_cfg_text('[tiers]\ndeps = ["**/Package.swift"]\n')
+        self.assertEqual(tier.compute([f("app/Package.swift")], cfg)[0], 2)
+        self.assertEqual(tier.compute([f("go.mod")], cfg)[0], 2)  # the core list still applies
+
+    def test_SizeIsInformationOnly(self):  # D23: a big change stays at its risk tier
+        t, reasons = tier.compute([f("src/a.py", 250, 50), f("docs/big.md", 500)], CFG)  # docs lines don't count
+        self.assertEqual((t, reasons[0]), (1, "computed T1: 2 files, 300 code lines"))
+        self.assertEqual(tier.compute([f(f"src/{i}.py") for i in range(40)], CFG)[0], 1)
 
     def test_IntegrityRaisesAndDeclared(self):
         flags = [integrity.Flag("I4", "raise:T2", "files outside the spec scope: src/b.py"),

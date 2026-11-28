@@ -19,6 +19,8 @@ flag = "none: <reason>"
 
 ## Open doubts (agent fills; owner answers inline)
 
+## Design and threats (T3)
+
 ## Risks and rollback
 
 ## Slices (multi-day work only; each slice is one PR)

@@ -68,6 +68,10 @@ def routes(**over):
     return r | over
 
 
+def t3_routes(**over):  # a declared T3: the only tier I7 checks (D23)
+    return routes(**{"issues/7": {"number": 7, "labels": [{"name": "tier:T3"}], "body": "Add the thing."}} | over)
+
+
 class Gates(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -105,8 +109,17 @@ class Gates(unittest.TestCase):
         self.assertTrue(body.startswith(gates.MARKER + "\n### factory gates (report-only): T2"))
         self.assertIn("**Integrity:** ok (0 failing, 1 raising)", body)
 
+    def test_DeclaredT2NeedsNoPin(self):  # D23: T2 is approved in the kickoff session; no label events or pins are read
+        pr = fixture("pr.json") | {"labels": [{"name": "tier:T2"}]}
+        r = routes(**{"pulls/12": pr})
+        for k in [k for k in r if k.startswith(("actions/", "issues/12/events"))]:
+            del r[k]
+        self.assertEqual(self.statuses(self.run_gates(FakeApi(r)))["factory/integrity"], ("success", "ok (1 raising flags)"))
+        r["issues/7"]["labels"] = [{"name": "tier:T3"}]
+        self.assertEqual(self.statuses(self.run_gates(FakeApi(r)))["factory/integrity"], ("failure", "failing: I7"))
+
     def test_PinReadsEventHeadBlob(self):
-        r = routes(**{f"contents/{SPEC_PATH}?ref=evhead": b64(SPEC) | {"sha": "blobEV"}})
+        r = t3_routes(**{f"contents/{SPEC_PATH}?ref=evhead": b64(SPEC) | {"sha": "blobEV"}})
         pr = fixture("pr.json")
         pr["head"]["sha"] = "evhead"  # the event's head (what the approver saw); the current head has moved on
         api = self.run_gates(FakeApi(r), action="labeled", label="spec-approved", sender="the-approver", pr=pr)
@@ -121,7 +134,7 @@ class Gates(unittest.TestCase):
         self.assertIn("Spec approval pinned: docs/specs/7-add-thing.md (blob blobEV)", self.comment(api))
 
     def test_PinAtCurrentHeadPasses(self):
-        api = self.run_gates(FakeApi(routes()), action="labeled", label="spec-approved", sender="the-approver")
+        api = self.run_gates(FakeApi(t3_routes()), action="labeled", label="spec-approved", sender="the-approver")
         self.assertEqual(self.statuses(api)["factory/integrity"][0], "success")
 
     def test_PinNeedsClosingIssue(self):  # a plain doc under specs_dir (no id) must never be pinned as "the spec"

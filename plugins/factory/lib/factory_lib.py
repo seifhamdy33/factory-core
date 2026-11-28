@@ -1,9 +1,11 @@
 """Shared by the factory hooks, bin/fx and ci/ (stdlib only, Python >= 3.11)."""
-import contextlib, copy, datetime, hashlib, json, os, re, shutil, signal, subprocess, time, tomllib
+import contextlib, copy, datetime, hashlib, json, os, re, shutil, signal, subprocess, sys, time
+if sys.version_info < (3, 11): raise SystemExit(0)  # noqa: E701 (no tomllib: hooks no-op; fx refuses first, D23)
+import tomllib  # noqa: E402
 from functools import lru_cache
 from pathlib import Path
 
-PACKET_KEYS = ("intent", "ac", "changed", "deviations", "test_changes", "new_deps", "look_here", "not_verified", "rollback")
+PACKET_KEYS = ("intent", "ac", "changed", "needs_you", "not_verified", "rollback")  # an overlay may add more keys
 DEFAULTS = {
     "project": "", "quarantine": [], "branch_types": [], "setup": [],
     "tests": ["tests/**", "test/**", "**/test_*.py", "**/*_test.py", "**/*.test.*", "**/*.spec.*"],
@@ -15,11 +17,11 @@ DEFAULTS = {
                                       "**/tsconfig*.json", "**/.coveragerc", "**/.nycrc*"]},
     "authority": {"approver": ""},
     "packet": {"max_lines": 40, "extra": [], "headings": dict(zip(PACKET_KEYS, (
-        "## Intent", "## Acceptance checks", "## What changed", "## Deviations from spec", "## Test changes",
-        "## New dependencies", "## Look here", "## Not verified", "## Rollback")))},
+        "## Intent", "## Acceptance checks", "## What changed", "## Needs you", "## Not verified", "## Rollback")))},
 }
-USER_DEFAULTS = {"verify_slots": 2, "lock_wait_s": 300, "session": {"build_note": ""}}
+USER_DEFAULTS = {"verify_slots": 2, "lock_wait_s": 300, "session": {"build_note": "", "notes": ".factory/work/{issue}/progress.md"}}
 GATE_FILES = [".claude/**", ".factory/**", ".github/**", "CLAUDE.md", "**/CLAUDE.md", "**/CODEOWNERS"]
+BLOCKER = re.compile(r"^## Block(?:er|ed)\b[^\n]*$(.*?)(?=^## |\Z)", re.M | re.S)  # the owner's `## Blocked` too
 VERIFY_LINE = re.compile(r"^factory-verify: (\S+) (PASS|FAIL) (\d+(?:\.\d+)?)s\s*$", re.M)
 NT = os.name == "nt"
 
@@ -29,14 +31,14 @@ def home():
 def now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
-def merge(base, over):  # dicts merge recursively; any other value in `over` replaces the base value
+def merge(base, over) -> dict:  # dicts merge recursively; any other value in `over` replaces the base value
     out = copy.deepcopy(base)
     for k, v in (over or {}).items():
         out[k] = merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
     return out
 
-def load_cfg_text(text):
-    return merge(DEFAULTS, tomllib.loads(text))
+def load_cfg_text(text, project=""):  # project: the overlay's, else the repo name
+    return merge(DEFAULTS | {"project": project}, tomllib.loads(text))
 
 def user_cfg():
     p = home() / "config.toml"
@@ -65,12 +67,16 @@ def repo_ctx(cwd):
         return None
     root = Path(root).resolve()
     cfg_path, branch = root / ".factory" / "config.toml", git(root, "rev-parse", "--abbrev-ref", "HEAD")
-    cfg = load_cfg_text(cfg_path.read_text("utf-8")) if cfg_path.exists() else None
     m = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?$", git(root, "remote", "get-url", "origin") or "")
+    text = cfg_path.read_text("utf-8") if cfg_path.exists() else "" if m else None  # no overlay needed on github.com
+    cfg = None if text is None else load_cfg_text(text, m.group(1).split("/")[1] if m else "")
     issue = parse_issue(cfg["branch"], branch) if cfg else None
     work = root / ".factory" / "work" / issue if issue else None
     return {"root": root, "branch": branch, "repo": m.group(1) if m else None, "cfg": cfg, "issue": issue,
             "work": work, "state": load_json(work / "state.json", {}) if work else {}}
+
+def notes_path(ctx):  # the session's handoff notes: the user's `[session] notes` file, else progress.md in the work dir
+    return ctx["root"] / user_cfg()["session"]["notes"].replace("{issue}", str(ctx["issue"]))
 
 def save_state(ctx, **updates):
     ctx["state"].update(updates)
@@ -128,8 +134,7 @@ def sh():
     return shutil.which("sh") or "C:/Program Files/Git/bin/sh.exe"
 
 def fingerprint(root):
-    status = git(root, "status", "--porcelain") or ""
-    return f"{git(root, 'rev-parse', 'HEAD')}:{hashlib.sha256(status.encode()).hexdigest()[:16]}"
+    return f"{git(root, 'rev-parse', 'HEAD')}:{hashlib.sha256((git(root, 'status', '--porcelain') or '').encode()).hexdigest()[:16]}"
 
 def _lk(fd, on):  # OS lock on byte 0 (non-blocking; OSError if held elsewhere)
     if os.name == "nt":
@@ -173,18 +178,17 @@ def _job(pid):  # Windows job holding pid's future children; MSYS fork breaks th
     ok = bool(job and proc and k.AssignProcessToJobObject(vp(job), vp(proc)))
     if proc:
         k.CloseHandle(vp(proc))
-    return (lambda: k.TerminateJobObject(vp(job), 1)) if ok else None
+    return (lambda: k.TerminateJobObject(vp(job), 1)) if ok else (lambda: None)
 
 def run_tree(cmd, cwd, timeout):  # own process group; on timeout kill the whole tree -> (rc, output, timed_out)
     p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                          creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if NT else 0, start_new_session=not NT)
-    job = _job(p.pid) if NT else None
+    job = _job(p.pid) if NT else (lambda: None)
     try:
         out, timed_out = p.communicate(timeout=timeout)[0], False
     except subprocess.TimeoutExpired:
         if os.name == "nt":  # never os.kill(pid, 0) on Windows: it terminates the process
-            if job:
-                job()
+            job()
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)
         else:
             os.killpg(p.pid, signal.SIGKILL)
@@ -229,8 +233,7 @@ def log(hook, ctx=None, **fields):
         f.write(json.dumps(rec) + "\n")
 
 def packet_check(text, cfg, tier):  # -> list of problems (empty = ok); tier is an int 0..3
-    pk, lines = cfg["packet"], text.splitlines()
-    present = {ln.strip() for ln in lines}
+    pk, lines, present = cfg["packet"], text.splitlines(), {ln.strip() for ln in text.splitlines()}
     probs = [f"missing heading {h!r}" for h in dict.fromkeys([*pk["headings"].values(), *pk["extra"]]) if h and h not in present]
     if len(lines) > pk["max_lines"]:
         probs.append(f"{len(lines)} lines > max {pk['max_lines']}")
@@ -242,6 +245,6 @@ def packet_check(text, cfg, tier):  # -> list of problems (empty = ok); tier is 
         body = m.group(1).strip() if m else ""
     if tier >= 1 and not body:
         probs.append(f"'Not verified' is empty (under {nv!r})")
-    if tier >= 2 and not re.search(r"^Review: /code-review \w+, \d+ findings", text, re.M):
-        probs.append("T2+ needs a line 'Review: /code-review <level>, <n> findings'")
+    if tier >= 2 and not re.search(r"^Review: .+, \d+ findings", text, re.M):  # any reviewer the user's setup runs
+        probs.append("T2+ needs a line 'Review: <reviewer>, <n> findings'")
     return probs

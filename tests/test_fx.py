@@ -1,4 +1,4 @@
-import contextlib, datetime, importlib.machinery, importlib.util, io, json, os, shutil
+import contextlib, importlib.machinery, importlib.util, io, json, os, shutil
 from pathlib import Path
 from unittest import mock
 
@@ -61,18 +61,10 @@ class Pure(FactoryTest):
         dflt = fl.load_cfg_text('project = "p"\n')
         self.assertEqual(fx.names(dflt, "7", "Add thing", []), ("f/7-add-thing", "7-add-thing"))
 
-    def test_ModelPerTier(self):
-        self.assertEqual([fx.MODELS[t] for t in range(4)],
-                         [("sonnet", "medium"), ("sonnet", "medium"), ("opus", "medium"), ("opus", "high")])
-
     def test_LabelTier(self):
         self.assertEqual(fx.label_tier([{"name": "tier:T0"}, {"name": "bug"}]), 0)
         self.assertEqual(fx.label_tier([{"name": "tier:T1"}, {"name": "tier:T3"}]), 3)
         self.assertEqual(fx.label_tier([], default=2), 2)
-
-    def test_CloudRefused(self):
-        code, _, err = call("build", "7", "--cloud")
-        self.assertEqual((code, err), (1, "fx build: Phase 1 is local-only.\nNext: fx build 7\n"))
 
     def test_RefRefusals(self):
         root = self.repo()
@@ -87,33 +79,15 @@ class Pure(FactoryTest):
         self.assertEqual(code, 1)
         self.assertIn("is not a factory repo", err)
 
-    def test_WeeklyPromptOnlyOnTty(self):
-        day = datetime.date(2026, 11, 27)
-        with mock.patch.object(fx.sys.stdin, "isatty", return_value=False), mock.patch("builtins.input") as ask:
-            fx.weekly(day)
-        ask.assert_not_called()
-        with mock.patch.object(fx.sys.stdin, "isatty", return_value=True), \
-                mock.patch("builtins.input", side_effect=EOFError):  # Windows NUL stdin claims to be a tty
-            fx.weekly(day)
-        self.assertFalse((self.home / "metrics" / "weekly.csv").exists())
-        with mock.patch.object(fx.sys.stdin, "isatty", return_value=True), \
-                mock.patch("builtins.input", return_value=" 42% ") as ask:
-            fx.weekly(day)
-            fx.weekly(day + datetime.timedelta(days=1))  # same ISO week: not asked again
-        ask.assert_called_once_with("Weekly /usage % (Enter to skip): ")
-        self.assertEqual((self.home / "metrics" / "weekly.csv").read_text("utf-8"),
-                         "week,date,usage_pct\n2026-W48,2026-11-27,42\n")
-
 
 def repo_entry(key, prs, wts=None, approver="the-approver"):
     cfg = fl.load_cfg_text(f'project = "p"\n[authority]\napprover = "{approver}"\n')
     return {"key": key, "cfg": cfg, "repo": f"o/{key}", "prs": prs, "wts": wts or {}}
 
 
-def pr(n, head, state="OPEN", draft=False, labels=(), integrity=None, repo="api"):
-    roll = [{"context": "factory/integrity", "state": integrity}] if integrity else []
-    return {"number": n, "url": f"https://github.com/o/{repo}/pull/{n}", "isDraft": draft, "state": state,
-            "headRefName": head, "labels": [{"name": x} for x in labels], "statusCheckRollup": roll}
+def pr(n, head, state="OPEN", labels=(), repo="api"):  # the PR_FIELDS fx reads
+    return {"number": n, "url": f"https://github.com/o/{repo}/pull/{n}", "state": state, "headRefName": head,
+            "labels": [{"name": x} for x in labels]}
 
 
 class Waiting(FactoryTest):
@@ -137,19 +111,26 @@ class Waiting(FactoryTest):
     def test_ShipFailedWaitingItem(self):
         blocked = self.wt("9", branch="f/9-b")
         write(blocked["path"] / ".factory" / "work" / "9" / "progress.md", "# p\n\n## Blocker\nneeds a key\n")
-        r = repo_entry(None, [pr(1, "f/1-a", draft=True), pr(2, "f/2-b", draft=True, labels=["spec-approved"], integrity="SUCCESS"),
-                              pr(3, "f/3-c", draft=True, labels=["spec-approved"], integrity="FAILURE"),
-                              pr(4, "f/4-d", draft=True, labels=["spec-approved"]),  # gates not posted yet
+        r = repo_entry(None, [pr(1, "f/1-a", labels=["tier:T3"]), pr(2, "f/2-b", labels=["tier:T3", "spec-approved"]),
+                              pr(3, "f/3-c", labels=["tier:T3"]),  # computed T3 only: no approval label (D23)
                               pr(6, "feature/not-factory"), pr(7, "f/7-m", state="MERGED")],
-                       {"8": self.wt("8", branch="f/8-a", ship="failed:unit,lint"), "9": blocked,
+                       {"1": self.wt("1", branch="f/1-a", tier=3), "2": self.wt("2", branch="f/2-b", tier=3),
+                        "3": self.wt("3", branch="f/3-c", tier=1),
+                        "8": self.wt("8", branch="f/8-a", ship="failed:unit,lint"), "9": blocked,
                         "7": self.wt("7", branch="f/7-m", pr="https://github.com/o/api/pull/7")})
         self.assertEqual(fx.waiting([r]), [
             "as the-approver, add `spec-approved`: https://github.com/o/api/pull/1",
-            "as the-approver, add `spec-approved`: https://github.com/o/api/pull/3",
-            "as the-approver, add `spec-approved`: https://github.com/o/api/pull/4",
+            "review/merge: https://github.com/o/api/pull/2",
+            "review/merge: https://github.com/o/api/pull/3",
             "`fx clean 7`",
             "8: ship failed at unit,lint. Next: `fx build 8`",
             f"unblock: {blocked['path'] / '.factory' / 'work' / '9' / 'progress.md'}"])
+
+    def test_UserNotesBlockedIsWaiting(self):
+        self.user_config('[session]\nnotes = ".claude-work/TASKS.md"\n')
+        w = self.wt("9", branch="f/9-b")
+        write(w["path"] / ".claude-work" / "TASKS.md", "# T\n## Blocked\n- which region?\n")
+        self.assertEqual(fx.waiting([repo_entry(None, [], {"9": w})]), [f"unblock: {w['path'] / '.claude-work' / 'TASKS.md'}"])
 
     def test_EmptyWorkspace(self):
         self.assertEqual(fx.waiting([]), [])
@@ -203,38 +184,20 @@ class Flows(FactoryTest):
 
     OK = {"ok": True, "failed": [], "reason": "ok", "tail": "", "lines": [], "seconds": 1.0, "over_budget": False}
 
-    def test_DraftToReady(self):
+    def test_ShipUpdatesOpenPr(self):
         _, wt, ctx = self.worktree()
         write(ctx["work"] / "packet.md", PACKET)
-        fake = FakeRun({"gh pr list": [{"number": 12, "url": "https://github.com/o/r/pull/12", "isDraft": True}]})
+        fake = FakeRun({"gh pr list": [{"number": 12, "url": "https://github.com/o/r/pull/12"}]})
         code, out, err, _ = self.fx_in(wt, fake, "ship", "7", verify=self.OK)
         self.assertEqual(code, 0, err)
         self.assertTrue(fake.has("git", "push", "-u", "origin", "f/7-add-thing"))
         self.assertTrue(fake.has("gh", "pr", "edit", "12", "-R", "o/r", "--body-file"))
-        self.assertTrue(fake.has("gh", "pr", "ready", "12", "-R", "o/r"))
         self.assertFalse(fake.has("gh", "pr", "create"))
         self.assertTrue(any("ledger.py" in c[1] and "append" in c for c in fake.calls))
         self.assertEqual((ctx["work"] / "pr_body.md").read_text("utf-8"), PACKET + "\nCloses #7\n")
         st = fl.load_json(ctx["work"] / "state.json")
         self.assertEqual((st["ship"], st["pr"]), ("ok", "https://github.com/o/r/pull/12"))
         self.assertIn("Next: wait for CI", out)
-
-    def test_DraftCreatesPr(self):
-        _, wt, ctx = self.worktree(tier=2)
-        code, _, err, _ = self.fx_in(wt, FakeRun({"gh pr list": []}), "ship", "--draft")  # no spec yet: no dead link
-        self.assertEqual(code, 1)
-        self.assertIn("no spec with id = 7 under docs/specs\nNext: /factory:shape 7", err)
-        write(wt / "docs" / "specs" / "7-add-thing.md", "+++\nid = 7\ntier = 2\n+++\n## Goal\nx\n")
-        fake = FakeRun({"gh pr list": [], "gh issue view": {"title": "Add thing"},
-                        "gh pr create": "Creating...\nhttps://github.com/o/r/pull/13"})
-        code, out, err, _ = self.fx_in(wt, fake, "ship", "--draft")
-        self.assertEqual(code, 0, err)
-        create = next(c for c in fake.calls if c[:3] == ["gh", "pr", "create"])
-        self.assertEqual(create[-3:], ["--label", "tier:T2", "--draft"])
-        self.assertIn("Spec awaiting approval: https://github.com/o/r/blob/f/7-add-thing/docs/specs/7-add-thing.md",
-                      (ctx["work"] / "pr_body.md").read_text("utf-8"))
-        self.assertNotIn("ship", fl.load_json(ctx["work"] / "state.json"))
-        self.assertIn("add label spec-approved; then fx build 7", out)
 
     def test_ShipRefusesBadPacketAndRedVerify(self):
         _, wt, ctx = self.worktree()
@@ -259,58 +222,62 @@ class Flows(FactoryTest):
         block = "+++\nid = 7\ntier = 1\n+++\n## Goal\nx"
         fake = FakeRun({"gh issue view": {"title": "Add thing", "labels": [{"name": "tier:T1"}],
                                           "body": f"intro\n<!-- factory:spec -->\n{block}\n<!-- /factory:spec -->\n"}})
+        write(ctx["work"] / "spec.md", "stale copy from an earlier build\n")
         code, _, err, launch = self.fx_in(main, fake, "build", "7")
         self.assertEqual(code, 0, err)
-        self.assertEqual((ctx["work"] / "spec.md").read_text("utf-8"), block + "\n")
+        self.assertEqual((ctx["work"] / "spec.md").read_text("utf-8"), block + "\n")  # always rewritten from the issue
         st = fl.load_json(ctx["work"] / "state.json")
         self.assertEqual((st["phase"], st["tier"], st["spec_path"]), ("build", 1, ".factory/work/7/spec.md"))
-        cwd, t, prompt, phase = launch.call_args.args
-        self.assertEqual((Path(cwd), t, phase), (wt, 1, "build"))
-        self.assertTrue(prompt.startswith("Implement the spec in .factory/work/7/spec.md. Keep .factory/work/7/progress.md"))
-        self.assertNotIn("/code-review", prompt)
+        w, prompt, phase = launch.call_args.args
+        self.assertEqual((w["root"], phase), (wt, "build"))
+        self.assertTrue(prompt.startswith("Implement the spec in .factory/work/7/spec.md, unattended"))
+        self.assertIn("Keep .factory/work/7/progress.md current", prompt)
+        self.assertIn("Run the reviews your setup requires for T1, or for the PR's factory/tier once CI computes a"
+                      " higher one. If it names none: at T2 and up one independent review in a fresh context", prompt)
+        self.assertIn("write a `## Blocker` section in .factory/work/7/progress.md", prompt)
+        self.assertRegex("## Blocker\nq\n", fl.BLOCKER)  # the heading the prompt names is the one fx detects
         for ch in '<>|&%"':
             self.assertNotIn(ch, prompt)  # claude is a .CMD on Windows
 
     def test_BuildT0WritesIntent(self):
         main, _, ctx = self.worktree(tier=0)
+        self.user_config(f'[session]\nnotes = "{(self.home / "notes.md").as_posix()}"\n')  # outside the worktree
         fake = FakeRun({"gh issue view": {"title": "Fix typo", "labels": [{"name": "tier:T0"}], "body": "In the README."}})
         code, _, err, launch = self.fx_in(main, fake, "build", "7")
         self.assertEqual(code, 0, err)
+        self.assertIn(f"Keep {self.home / 'notes.md'} current", launch.call_args.args[1])
         self.assertEqual((ctx["work"] / "intent.md").read_text("utf-8"), "# Fix typo\n\nIn the README.\n")
-        self.assertEqual(launch.call_args.args[1], 0)
+        self.assertEqual(fl.load_json(ctx["work"] / "state.json")["tier"], 0)
 
-    def test_BuildT2NeedsPin(self):
+    def test_BuildT2NeedsOnlyASpec(self):  # D23: no approval before the build; a T3 spec is approved on the PR
         main, wt, ctx = self.worktree(tier=2)
-        write(wt / "docs" / "specs" / "7-add-thing.md", "+++\nid = 7\ntier = 2\n+++\n## Goal\nx\n")
-        fake = FakeRun({"gh issue view": {"title": "t", "labels": [{"name": "tier:T2"}], "body": ""},
-                        "gh pr list": [{"number": 12, "url": "https://github.com/o/r/pull/12", "isDraft": True}]})
-        with mock.patch.object(fx, "pin_ok", return_value=False) as pin:
-            code, _, err, launch = self.fx_in(main, fake, "build", "7")
+        fake = FakeRun({"gh issue view": {"title": "t", "labels": [{"name": "tier:T2"}], "body": ""}})
+        code, _, err, launch = self.fx_in(main, fake, "build", "7")
         self.assertEqual(code, 1)
-        pin.assert_called_once_with(mock.ANY, 12, "docs/specs/7-add-thing.md")
-        self.assertIn("Next: as the approver, add label spec-approved on https://github.com/o/r/pull/12", err)
+        self.assertIn("T2 needs a spec file under docs/specs with id = 7\nNext: fx shape 7", err)
         launch.assert_not_called()
-        with mock.patch.object(fx, "pin_ok", return_value=True):
-            code, _, err, launch = self.fx_in(main, fake, "build", "7")
+        write(wt / "docs" / "specs" / "7-add-thing.md", "+++\nid = 7\ntier = 2\n+++\n## Goal\nx\n")
+        code, _, err, launch = self.fx_in(main, fake, "build", "7")
         self.assertEqual(code, 0, err)
-        self.assertIn("run `/code-review medium`", launch.call_args.args[2])
-        self.assertEqual(launch.call_args.args[1], 2)
+        self.assertFalse(fake.has("gh", "pr", "list"))  # no pin lookup
+        self.assertIn("requires for T2, or for the PR's factory/tier", launch.call_args.args[1])
+        self.assertEqual(fl.load_json(ctx["work"] / "state.json")["tier"], 2)
 
-    def test_PinOkComparesLatestPin(self):
-        _, wt, ctx = self.worktree()
-        write(wt / "docs" / "specs" / "s.md", "spec\n")
-        blob = fl.git(wt, "hash-object", "docs/specs/s.md")
-        ctx["cfg"]["authority"]["approver"] = "boss"
-        pins = [{"pin": {"pr": 12, "spec": "docs/specs/s.md", "blob": blob, "by": "boss"}},
-                {"pin": {"pr": 99, "spec": "x", "blob": "x", "by": "x"}}]
-        with mock.patch.object(fx, "run", return_value="tok"), mock.patch.object(fx.gates, "collect_pins", return_value=pins):
-            self.assertTrue(fx.pin_ok(ctx, 12, "docs/specs/s.md"))
-            pins.append({"pin": {"pr": 12, "spec": "docs/specs/s.md", "blob": "old", "by": "boss"}})
-            self.assertFalse(fx.pin_ok(ctx, 12, "docs/specs/s.md"))
+    def remote_head(self, main, branch="main"):  # as `git clone` leaves it: origin/HEAD -> the default branch
+        git(main, "update-ref", f"refs/remotes/origin/{branch}", "HEAD")
+        git(main, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{branch}")
+
+    def test_ShapeRefusesAWorkspaceParent(self):  # D23: the kickoff splits a parent into slices
+        main = self.main_repo(cfg='project = "ws"\n[workspace]\norder = ["api"]\n[workspace.repos.api]\nrepo = "o/api"\n')
+        fake = FakeRun({"gh issue view": {"title": "Both", "labels": [{"name": "factory:parent"}], "body": ""}})
+        code, _, err, launch = self.fx_in(main, fake, "shape", "7")
+        self.assertEqual(code, 1)
+        self.assertIn("#7 is a workspace parent: /factory:idea split it into slices\nNext: fx shape <key>#<slice>", err)
+        launch.assert_not_called()
 
     def test_ShapeCreatesWorktreeAndState(self):
         main = self.main_repo()
-        git(main, "update-ref", "refs/remotes/origin/main", "main")
+        self.remote_head(main)
         fake = FakeRun({"gh issue view": {"title": "Add the Thing!", "labels": [{"name": "tier:T2"}],
                                           "body": "Intent.\nParent: o/ws#1\n"}})
         code, _, err, launch = self.fx_in(main, fake, "shape", "7")
@@ -321,7 +288,7 @@ class Flows(FactoryTest):
         self.assertEqual({k: st[k] for k in ("issue", "repo", "branch", "parent", "phase", "tier")},
                          {"issue": "7", "repo": "o/r", "branch": "f/7-add-the-thing", "parent": "o/ws#1",
                           "phase": "shape", "tier": 2})
-        self.assertEqual(launch.call_args.args[1:], (3, "/factory:shape 7", "shape"))
+        self.assertEqual(launch.call_args.args[1:], ("/factory:shape 7", "shape"))
         self.assertTrue(fake.has("git", "fetch", "origin"))
         code, _, err, _ = self.fx_in(main, fake, "shape", "7")  # rerun reuses the worktree
         self.assertEqual(code, 0, err)
@@ -329,7 +296,7 @@ class Flows(FactoryTest):
 
     def test_ShapeRunsSetupOncePerWorktree(self):
         main = self.main_repo(cfg='project = "demo"\nsetup = ["fx-setup-probe", "--frozen"]\n')
-        git(main, "update-ref", "refs/remotes/origin/main", "main")
+        self.remote_head(main)
         fake = FakeRun({"gh issue view": {"title": "Add the Thing", "labels": [], "body": ""}})
         code, out, err, launch = self.fx_in(main, fake, "shape", "7")
         self.assertEqual(code, 0, err)
@@ -344,21 +311,81 @@ class Flows(FactoryTest):
 
     def test_ShapeSetupAcceptsOneString(self):
         main = self.main_repo(cfg='project = "demo"\nsetup = "fx-setup-probe --frozen"\n')
-        git(main, "update-ref", "refs/remotes/origin/main", "main")
+        self.remote_head(main)
         fake = FakeRun({"gh issue view": {"title": "Add the Thing", "labels": [], "body": ""}})
         code, _, err, _ = self.fx_in(main, fake, "shape", "7")
         self.assertEqual(code, 0, err)
         self.assertEqual([c for c in fake.calls if c[0] == "fx-setup-probe"], [["fx-setup-probe", "--frozen"]])
 
+    def test_ShapeNoOverlayMasterDefault(self):  # D23: no overlay, a `master` default branch, no gitignore entry
+        main = self.tmp / "plain"
+        main.mkdir()
+        git(main, "init", "-q", "-b", "master")
+        write(main / "app.py", "x = 1\n")
+        git(main, "add", "-A")
+        git(main, "commit", "-q", "-m", "init")
+        git(main, "remote", "add", "origin", "git@github.com:o/plain.git")
+        self.remote_head(main, "master")
+        git(main, "commit", "-q", "--allow-empty", "-m", "local work")  # the worktree starts from origin/HEAD, not HEAD
+        fake = FakeRun({"gh issue view": {"title": "Add thing", "labels": [{"name": "tier:T1"}], "body": ""}})
+        code, _, err, _ = self.fx_in(main, fake, "shape", "7")
+        self.assertEqual(code, 0, err)
+        wt = (main / ".." / "plain-worktrees").resolve() / "7-add-thing"
+        self.assertEqual(fl.git(wt, "rev-parse", "HEAD"), fl.git(main, "rev-parse", "origin/master"))
+        self.assertTrue((wt / ".factory" / "work" / "7" / "state.json").is_file())
+        self.assertEqual(fl.git(wt, "status", "--porcelain"), "")  # the work dir is ignored through info/exclude
+        code, _, err, _ = self.fx_in(main, fake, "shape", "7")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((main / ".git" / "info" / "exclude").read_text("utf-8").count(".factory/work/"), 1)
+        self.assertTrue((main / ".git" / "info" / "exclude").read_bytes().endswith(b"\n.factory/work/\n"))  # LF
+
+    def test_ShapeRefusesEmptyRepo(self):
+        main = self.main_repo()  # no origin/HEAD, and set-head --auto finds none (the remote has no commits)
+        real = fl.git
+        with mock.patch.object(fl, "git", side_effect=lambda cwd, *a: None if a[:2] == ("remote", "set-head") else real(cwd, *a)):
+            code, _, err, launch = self.fx_in(main, FakeRun({"gh issue view": {"title": "t", "labels": [], "body": ""}}),
+                                              "shape", "7")
+        self.assertEqual(code, 1)
+        self.assertIn("o/r has no default branch yet (an empty repo)\nNext: push a first commit, then fx shape 7", err)
+        launch.assert_not_called()
+
+    def test_LaunchStartsABackgroundSession(self):  # D23: no model flags; fx returns at once and records the session
+        main, wt, ctx = self.worktree()
+        ok = mock.Mock(returncode=0, stdout="backgrounded \u00b7 3ed22d67-a1b2\n  claude agents  list sessions\n", stderr="")
+        with mock.patch.object(fx.subprocess, "run", return_value=ok) as r, contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(fx.launch(ctx, "/factory:shape 7", "shape"), 0)
+        self.assertEqual(r.call_args.args[0][1:], ["--bg", "/factory:shape 7"])
+        self.assertEqual(Path(r.call_args.kwargs["cwd"]), wt)
+        env = r.call_args.kwargs["env"]
+        self.assertEqual(env["FACTORY_PHASE"], "shape")
+        self.assertNotIn("CLAUDE_CODE_USE_POWERSHELL_TOOL", set(env) - set(os.environ))
+        self.assertIn("Watch: claude attach 3ed22d67-a1b2", out.getvalue())  # ids may hold hyphens
+        self.assertEqual(fl.load_json(ctx["work"] / "state.json")["sessions"], ["3ed22d67-a1b2"])
+        bad = mock.Mock(returncode=1, stdout="", stderr="Workspace not trusted. Run `claude` in X once.")
+        ctx = fl.repo_ctx(wt)  # before the patch: repo_ctx runs git
+        with mock.patch.object(fx.subprocess, "run", return_value=bad), self.assertRaises(fx.Refused) as e:
+            fx.launch(ctx, "/factory:shape 7", "shape")
+        self.assertIn("claude --bg did not start: Workspace not trusted.", str(e.exception))
+        self.assertIn("Next: fix the cause above, then rerun fx shape", str(e.exception))
+
     def test_CleanNeedsMerged(self):
-        main, wt, ctx = self.worktree(pr="https://github.com/o/r/pull/12")
+        main, wt, ctx = self.worktree(pr="https://github.com/o/r/pull/12", sessions=["aa11", "bb22"])
         write(ctx["work"] / "progress.md", "notes\n")
         fake = FakeRun({"gh pr view": {"state": "OPEN", "url": "https://github.com/o/r/pull/12"}})
         code, _, err, _ = self.fx_in(main, fake, "clean", "7")
         self.assertIn("is open, not merged\nNext: the owner merges it, then fx clean 7", err)
         fake.gh["gh pr view"]["state"] = "MERGED"
-        code, out, err, _ = self.fx_in(main, fake, "clean", "7")
+        real, calls, listed = fx.subprocess.run, [], iter(['warning: not JSON\n[{"id": "aa11"}]', "{}"])
+        def run(cmd, *a, **k):  # claude calls are recorded (agents lists aa11 once, then nothing); git runs for real
+            if "claude" not in Path(cmd[0]).name.lower():
+                return real(cmd, *a, **k)
+            calls.append(cmd[1:])
+            return mock.Mock(stdout=next(listed) if cmd[1] == "agents" else "")
+        with mock.patch.object(fx.subprocess, "run", run), mock.patch.object(fx.time, "sleep") as nap:
+            code, out, err, _ = self.fx_in(wt, fake, "clean", "7")  # from inside the worktree
         self.assertEqual(code, 0, err)
+        self.assertEqual(calls, [["stop", "aa11"], ["stop", "bb22"], ["agents", "--json"], ["agents", "--json"]])
+        nap.assert_called_once()  # waited until the stopped sessions were gone
         self.assertFalse(wt.exists())
         self.assertIsNone(fl.git(main, "rev-parse", "--verify", "--quiet", "refs/heads/f/7-add-thing"))
         self.assertEqual((self.home / "archive" / "o" / "r" / "7" / "progress.md").read_text("utf-8"), "notes\n")
@@ -366,11 +393,31 @@ class Flows(FactoryTest):
     def test_StatusEndToEnd(self):
         main, wt, ctx = self.worktree(ship="failed:unit")
         fake = FakeRun({"gh pr list": []})
-        with mock.patch.object(fx.sys.stdin, "isatty", return_value=False):
-            code, out, err, _ = self.fx_in(main, fake, "status")
+        code, out, err, _ = self.fx_in(main, fake, "status")
         self.assertEqual(code, 0, err)
         self.assertIn("7      T1    build", out)
         self.assertIn("Waiting on you:\n- 7: ship failed at unit. Next: `fx build 7`", out)
+
+    def test_BareFxCleansMergedCleanWorktrees(self):  # item 13: bare fx only; a dirty worktree stays and is listed
+        u7, u8 = "https://github.com/o/r/pull/7", "https://github.com/o/r/pull/8"
+        main, wt7, ctx7 = self.worktree(pr=u7)
+        write(ctx7["work"] / "progress.md", "notes\n")
+        wt8 = self.tmp / "wts" / "8-add-thing"
+        git(main, "worktree", "add", "-q", "-b", "f/8-add-thing", str(wt8))
+        fl.save_state(fl.repo_ctx(wt8), issue="8", branch="f/8-add-thing", phase="build", tier=1, pr=u8)
+        write(wt8 / "wip.py", "x = 1\n")  # uncommitted work
+        fake = FakeRun({"gh pr list": [pr(7, "f/7-add-thing", "MERGED", repo="r"), pr(8, "f/8-add-thing", "MERGED", repo="r")]})
+        code, out, err, _ = self.fx_in(main, fake, "status")
+        self.assertEqual(code, 0, err)
+        self.assertTrue(wt7.exists())  # `fx status` never cleans
+        code, out, err, _ = self.fx_in(main, fake)
+        self.assertEqual(code, 0, err)
+        self.assertFalse(wt7.exists())
+        self.assertIn("Cleaned #7", out)
+        self.assertEqual((self.home / "archive" / "o" / "r" / "7" / "progress.md").read_text("utf-8"), "notes\n")
+        self.assertTrue(wt8.exists())
+        self.assertIn("- `fx clean 8`", out)
+        self.assertNotIn("`fx clean 7`", out)
 
     def test_VerifyPrintsTotal(self):
         _, wt, _ = self.worktree()

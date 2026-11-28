@@ -1,7 +1,8 @@
 # ~/.factory/config.toml: machine-local factory settings (spec: Machine-local state). Never committed anywhere.
-# user/apply.py copies this file there when it is missing; edit the copy, not this template.
+# Optional: copy it there to change a default. Every key has a core default (factory_lib.USER_DEFAULTS).
 verify_slots = 2        # verify runs at once across worktrees
 lock_wait_s = 300       # wait at most this long for verify locks, then block with reason lock-timeout
 
 [session]
 build_note = "This is delegating mode: a spec exists; work to the finish line."
+# notes = ".factory/work/{issue}/progress.md"   # your handoff file, per worktree, e.g. ".claude-work/TASKS.md"

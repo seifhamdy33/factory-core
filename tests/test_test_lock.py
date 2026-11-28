@@ -18,10 +18,10 @@ class TestLock(FactoryTest):
         return tl.handle(json.dumps(data))
 
     def assertDenied(self, path, glob=None, **kw):
-        code, msg = self.edit(path, **kw)
+        code, msg = self.edit(path, **{k: v for k, v in kw.items() if k != "notes"})
         self.assertEqual(code, 2, path)
         self.assertIn("Acceptance tests are locked (", msg)
-        self.assertIn("`## Spec issues` in progress.md", msg)
+        self.assertIn(f"`## Spec issues` in {kw.pop('notes', '.factory/work/7/progress.md')} and", msg)
         if glob:
             self.assertIn(f"matches {glob})", msg)
 
@@ -47,6 +47,10 @@ class TestLock(FactoryTest):
         self.assertDenied(self.root / "docs" / "specs" / "7-x.md", "docs/specs/7-x.md")
         self.assertDenied(self.root / "tests" / "acceptance" / "test_7_flow.py")
         self.assertAllowed(self.root / "docs" / "specs" / "8-other.md")
+
+    def test_DenyNamesTheUsersNotesFile(self):  # D23: the user's [session] notes, by its path in the worktree
+        self.user_config('[session]\nnotes = ".claude-work/TASKS.md"\n')
+        self.assertDenied(self.root / "tests" / "acceptance" / "test_7_x.py", notes=".claude-work/TASKS.md")
 
     def test_NotebookPathDenied(self):
         self.assertDenied(self.root / "tests" / "acceptance" / "a.ipynb", tool="NotebookEdit", key="notebook_path")

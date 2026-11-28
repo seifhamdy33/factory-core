@@ -17,8 +17,8 @@ check() {  # check <name> <command...>
   echo "factory-verify: $name $result $(( $(date +%s) - start ))s"
 }
 
-changed() {  # files changed since the merge base with origin/main, plus untracked files; deletions excluded
-  base=$(git merge-base origin/main HEAD 2>/dev/null || echo HEAD)
+changed() {  # files changed since the merge base with the default branch, plus untracked files; deletions excluded
+  base=$(git merge-base origin/HEAD HEAD 2>/dev/null || echo HEAD)
   { git diff --name-only --diff-filter=d "$base"; git ls-files --others --exclude-standard; } | sort -u
 }
 

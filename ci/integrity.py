@@ -2,8 +2,9 @@
 
 pr     GitHub PR object plus "files" (list PR files, with patches) and "files_truncated" (bool).
 spec   None, or {"meta", "sections", "path" (spec file at head; None for an issue-body spec), "issue"}.
-events {"tier": final tier or None (first pass), "compare": compare(spec_commit...head) JSON or None,
-        "label_events": issue events, "pins": [{"run": {"event", "path"}, "pin": pin.json}], "spec_blob": sha}.
+events {"tier": final tier or None (first pass), "declared": declared tier (issue label or spec; only I7 reads it),
+        "compare": compare(spec_commit...head) JSON or None, "label_events": issue events,
+        "pins": [{"run": {"event", "path"}, "pin": pin.json}], "spec_blob": sha}.
 Comments are never an input: a comment can be posted by any workflow as github-actions[bot]."""
 import collections, re, sys
 from pathlib import Path
@@ -14,9 +15,10 @@ import factory_lib as fl  # noqa: E402
 from tier import names, tier_num  # noqa: E402
 
 Flag = collections.namedtuple("Flag", "code kind msg")  # kind: "fail" | "raise:T2" | "raise:T3"
-ASSERT = re.compile(r"\bassert\b|\bself\.assert\w*|\bpytest\.raises\b|\bexpect\(")
-SKIP = re.compile(r"@pytest\.mark\.skip|\bxfail\b|\.skip\(|\.only\(|\btest\.todo\b")
-SUPPRESS = re.compile(r"#\s*type:\s*ignore|@ts-ignore|@ts-expect-error|eslint-disable|#\s*noqa")
+# Stacks as data (D23): an overlay's [integrity] assert/skip/suppress lists are added to these, never replace them.
+ASSERT = [r"\bassert\b", r"\bself\.assert\w*", r"\bpytest\.raises\b", r"\bexpect\("]
+SKIP = [r"@pytest\.mark\.skip", r"\bxfail\b", r"\.skip\(", r"\.only\(", r"\btest\.todo\b"]
+SUPPRESS = [r"#\s*type:\s*ignore", r"@ts-ignore", r"@ts-expect-error", r"eslint-disable", r"#\s*noqa"]
 LABEL, PIN_EVENT, PIN_PATH = "spec-approved", "pull_request_target", ".github/workflows/factory.yml"
 
 def short(items, n=5):
@@ -40,8 +42,12 @@ def i1_locked(spec, events):
     return [Flag("I1", "fail", f"locked files changed after spec_commit: {short(hits)}. "
                                "Next: revert them; if a test is wrong, write it under ## Spec issues")] * bool(hits) + cut
 
+def patterns(cfg, key, base):
+    return re.compile("|".join(f"(?:{p})" for p in [*base, *cfg["integrity"].get(key, [])]))
+
 def i2_test_edits(pr, cfg):
     out, nopatch, gone, skips, sups = [], [], [], [], []
+    a, sk, su = patterns(cfg, "assert", ASSERT), patterns(cfg, "skip", SKIP), patterns(cfg, "suppress", SUPPRESS)
     if pr.get("files_truncated"):
         out.append(Flag("I2", "raise:T2", "more PR files than the API lists: patch unavailable"))
     for f in pr.get("files", []):
@@ -52,9 +58,9 @@ def i2_test_edits(pr, cfg):
             nopatch.append(n)
             continue
         added, removed = collections.Counter(diff_lines(f["patch"], "+")), collections.Counter(diff_lines(f["patch"], "-"))
-        gone += [f"{n}: {ln}" for ln in removed - added if ASSERT.search(ln)]  # moved lines cancel out
-        skips += [f"{n}: {ln}" for ln in added - removed if SKIP.search(ln)]
-        sups += [f"{n}: {ln}" for ln in added - removed if SUPPRESS.search(ln)]
+        gone += [f"{n}: {ln}" for ln in removed - added if a.search(ln)]  # moved lines cancel out
+        skips += [f"{n}: {ln}" for ln in added - removed if sk.search(ln)]
+        sups += [f"{n}: {ln}" for ln in added - removed if su.search(ln)]
     for items, what in ((nopatch, "patch unavailable"), (gone, "removed assertions"), (skips, "added skip/only/todo"),
                         (sups, "added suppressions")):
         if items:
@@ -65,9 +71,9 @@ def i7_approval(pr, spec, cfg, events):
     who, url = cfg["authority"]["approver"], pr.get("html_url") or f"PR #{pr['number']}"
     again = f"Next: as {who}, re-apply {LABEL} on {url}"
     if not who:
-        return "set authority.approver in .factory/config.toml (T2+ needs an approver)"
+        return "set authority.approver in .factory/config.toml (a declared T3 needs an approver)"
     if not spec or not spec.get("path"):
-        return "T2/T3 needs a spec file under specs_dir. Next: /factory:shape <issue>"
+        return "a declared T3 needs a spec file under specs_dir. Next: /factory:shape <issue>"
     if LABEL not in {lb.get("name") for lb in pr.get("labels", [])}:
         return f"no {LABEL} label. Next: as {who}, review the spec and add {LABEL} on {url}"
     evs = [e for e in events.get("label_events", []) if e.get("event") == "labeled"
@@ -107,6 +113,7 @@ def check(pr, spec, cfg, events):
                                           "Next: fix the test or change the acceptance check"))
     if tier is not None and tier > 0 and not spec:
         out.append(Flag("I6", "fail", f"needs a spec. Next: /factory:shape {events.get('issue') or '<issue>'}"))
-    if tier is not None and tier >= 2 and spec and (msg := i7_approval(pr, spec, cfg, events)):
+    # D23: approval at the PR, only for a declared T3; a computed raise changes merge policy, never asks for approval
+    if (events.get("declared") or 0) >= 3 and spec and (msg := i7_approval(pr, spec, cfg, events)):
         out.append(Flag("I7", "fail", msg))
     return out

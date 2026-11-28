@@ -1,6 +1,6 @@
 import os, subprocess, sys, tempfile, time, unittest
 
-from tests.helpers import FactoryTest, fl, write
+from tests.helpers import FactoryTest, fl, git, write
 
 SPEC = '+++\nid = 7\ntier = 1\nspec_commit = "abc123"\nlocked = ["tests/acceptance/**"]\n+++\n' \
        "## Goal\nDo the thing.\n\n## Acceptance checks\n- AC1 works\n"
@@ -50,10 +50,15 @@ class RepoCtx(FactoryTest):
         self.assertEqual(ctx["cfg"]["verify"]["full_locks"], ["docker"])
         self.assertEqual(ctx["cfg"]["verify"]["cap_s"], 600)  # default kept
 
-    def test_NoConfig(self):
-        ctx = fl.repo_ctx(self.repo(cfg=None))
-        self.assertIsNone(ctx["cfg"])
-        self.assertIsNone(ctx["issue"])
+    def test_NoOverlayNeeded(self):  # D23: any github.com repo gets the core defaults, project = the repo name
+        root = self.repo(cfg=None)
+        ctx = fl.repo_ctx(root)
+        self.assertEqual(ctx["cfg"], fl.DEFAULTS | {"project": "r"})
+        self.assertEqual(ctx["issue"], "7")
+        git(root, "remote", "set-url", "origin", "https://gitlab.example/o/r.git")
+        self.assertIsNone(fl.repo_ctx(root)["cfg"])  # not GitHub and no overlay: not a factory repo
+        write(root / ".factory" / "config.toml", 'project = "own"\n')
+        self.assertEqual(fl.repo_ctx(root)["cfg"]["project"], "own")
 
     def test_OutsideGit(self):
         self.assertIsNone(fl.repo_ctx(self.tmp))
@@ -281,7 +286,12 @@ class Packet(unittest.TestCase):
 
     def test_ReviewLineT2(self):
         self.assertIn("Review:", fl.packet_check(packet(), self.cfg, 2)[0])
-        self.assertEqual(fl.packet_check(packet(look_here="Review: /code-review medium, 2 findings"), self.cfg, 2), [])
+        self.assertEqual(fl.packet_check(packet(needs_you="Review: /code-review medium, 2 findings"), self.cfg, 2), [])
+        self.assertEqual(fl.packet_check(packet(needs_you="Review: fresh-context subagent, 0 findings"), self.cfg, 2), [])
+
+    def test_OverlayKeyStillRequired(self):  # D23: keys dropped from the defaults stay required where an overlay sets them
+        cfg = fl.load_cfg_text('project = "x"\n[packet.headings]\ndeviations = "## Deviations from spec"\n')
+        self.assertEqual(fl.packet_check(packet(), cfg, 1), ["missing heading '## Deviations from spec'"])
 
 
 if __name__ == "__main__":

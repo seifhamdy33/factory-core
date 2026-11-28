@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""SessionStart: print the factory rules; on resume/compact/clear also the spec and progress.md
-(spec: Hooks > reinject.py). Stdout is added to context; over 10,000 chars it is replaced by a preview."""
+"""SessionStart: print the factory rules; on resume/compact/clear also the spec and the notes file
+(spec: Hooks > reinject.py). Notes the user set in `[session] notes` get one pointer line: their own hooks reload it. Stdout is added to context; over 10,000 chars it is replaced by a preview."""
 import json, os, sys
 from pathlib import Path
 
@@ -24,11 +24,14 @@ def run(data):
     src, issue = data.get("source") or "startup", ctx["issue"]
     w = f".factory/work/{issue}"
     spec_path = ctx["state"].get("spec_path") or f"{w}/spec.md"
-    note = fl.user_cfg()["session"]["build_note"] if ph == "build" else ""
-    where = f", issue #{issue}, spec {spec_path}" if issue else ""
+    sess = fl.user_cfg()["session"]
+    note, own = sess["build_note"] if ph == "build" else "", sess["notes"] != fl.USER_DEFAULTS["session"]["notes"]
+    p = fl.notes_path(ctx) if issue else None
+    notes = (p.relative_to(ctx["root"]).as_posix() if p.is_relative_to(ctx["root"]) else str(p)) if p else ""
+    where = f", issue #{issue}, spec {spec_path}, notes {notes}" if issue else ""
     out = "\n".join(x for x in (CORE_LINE, note, f"Factory session: phase {ph}{where}.") if x)
     if src != "startup" and issue:
-        files = [(p, end, ctx["root"] / p) for p, end in ((spec_path, False), (f"{w}/progress.md", True))]
+        files = [(p, end, ctx["root"] / p) for p, end in ((spec_path, False), *([] if own else [(notes, True)]))]
         files = [(p, end, f.read_text("utf-8", errors="replace")) for p, end, f in files if f.is_file()]
         for i, (p, end, text) in enumerate(files):
             head = f"\n\n--- {p} ---\n"

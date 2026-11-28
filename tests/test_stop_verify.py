@@ -1,11 +1,12 @@
 import json, os, unittest
 from unittest import mock
 
-from tests.helpers import FactoryTest, fl, load_hook, run_script, write
+from tests.helpers import FactoryTest, fl, git, load_hook, run_script, write
 
 sv = load_hook("stop_verify")
 RED = '#!/bin/sh\necho "factory-verify: lint PASS 1s"\necho "AssertionError: expected 2"\n' \
       'echo "factory-verify: unit FAIL 3s"\nexit 1\n'
+NOTES = ".factory/work/7/progress.md"
 COUNTING_RED = 'echo x >> "$FACTORY_TEST_COUNT"\necho "factory-verify: unit FAIL 1s"\nexit 1\n'
 
 
@@ -26,7 +27,7 @@ class StopVerify(FactoryTest):
         self.assertEqual(code, 2)
         self.assertIn("Failing: unit", msg)
         self.assertIn("AssertionError: expected 2", msg)
-        self.assertTrue(msg.endswith(sv.NEXT_FIX))
+        self.assertTrue(msg.endswith(sv.NEXT_FIX.format(notes=NOTES)))
         self.set_verify(ctx, "#!/bin/sh\necho 'factory-verify: unit PASS 1s'\n")
         self.assertEqual(self.stop(ctx), (0, ""))
         self.assertNotIn("count", self.stop_state(ctx))
@@ -38,7 +39,7 @@ class StopVerify(FactoryTest):
         results = [self.stop(ctx) for _ in range(3)]
         self.assertEqual([c for c, _ in results], [2, 2, 2])
         self.assertNotIn("Stop iterating", results[1][1])
-        self.assertTrue(results[2][1].startswith(sv.BLOCKER_ASK))
+        self.assertTrue(results[2][1].startswith(sv.BLOCKER_ASK.format(notes=NOTES)))
         st = self.stop_state(ctx)
         self.assertEqual((st["count"], st["blocker_requested"]), (3, True))
         self.set_verify(ctx, '#!/bin/sh\necho "factory-verify: lint FAIL 1s"\nexit 1\n')  # a new failure resets
@@ -51,6 +52,20 @@ class StopVerify(FactoryTest):
         write(ctx["work"] / "progress.md", "## Notes\nx\n\n## Blocker\nShould AC2 use UTC?\n")
         self.assertEqual(self.stop(ctx), (0, ""))
         self.assertEqual(self.log_lines()[-1]["reason"], "blocker")
+
+    def test_UserNotesAndBlockedHeading(self):  # D23: the user's own handoff file and its `## Blocked` heading
+        self.user_config('[session]\nnotes = ".claude-work/TASKS.md"\n')
+        ctx = self.build_ctx(verify=RED)
+        code, msg = self.stop(ctx)
+        self.assertEqual(code, 2)
+        self.assertTrue(msg.endswith("add `## Blocker` to .claude-work/TASKS.md if you're stuck."))
+        write(ctx["work"] / "progress.md", "## Blocker\nignored: not the notes file\n")
+        self.assertEqual(self.stop(ctx)[0], 2)
+        write(ctx["root"] / ".claude-work" / "TASKS.md", "# TASKS\n## Blocked\n- need the staging URL\n## Next\nx\n")
+        self.assertEqual(self.stop(ctx), (0, ""))
+        self.assertEqual(sv.blocker_hash(ctx["root"] / ".claude-work" / "TASKS.md"),
+                         sv.blocker_hash(write(self.tmp / "n.md", "## Blocked\n- need the staging URL\n")))
+        self.assertIsNone(sv.blocker_hash(write(self.tmp / "m.md", "## Blockers-ish\n## Blockade\nx\n")))
 
     def test_BlockerConsumedOnce(self):
         ctx = self.build_ctx(verify=RED)
@@ -87,7 +102,7 @@ class StopVerify(FactoryTest):
             results = [self.stop(ctx) for _ in range(3)]
         self.assertEqual([c for c, _ in results], [2, 2, 2])
         self.assertIn("factory hook error: RuntimeError: boom", results[0][1])
-        self.assertTrue(results[2][1].startswith(sv.BLOCKER_ASK))
+        self.assertTrue(results[2][1].startswith(sv.BLOCKER_ASK.format(notes=NOTES)))
         self.assertEqual(self.stop_state(ctx)["sig"], "hook-error")
         self.assertEqual(sv.handle("not json")[0], 0)  # unknown session, no FACTORY_PHASE: allow
         os.environ["FACTORY_PHASE"] = "build"
@@ -114,7 +129,7 @@ class StopVerify(FactoryTest):
             results = [sv.handle(raw) for _ in range(3)]
         self.assertEqual([c for c, _ in results], [2, 2, 2])
         self.assertIn(sv.NEXT["timeout"], results[0][1])
-        self.assertTrue(results[2][1].startswith(sv.BLOCKER_ASK))
+        self.assertTrue(results[2][1].startswith(sv.BLOCKER_ASK.format(notes=NOTES)))
 
     def test_LockTimeoutCountsStrike(self):
         self.user_config("verify_slots = 1\nlock_wait_s = 0.3\n")
@@ -150,12 +165,15 @@ class StopVerify(FactoryTest):
         self.assertEqual(self.stop(ctx), (0, ""))
         self.assertEqual(self.log_lines(), [])
 
-    def test_NoConfigNoop(self):
+    def test_NotAFactoryRepoNoop(self):  # not on GitHub and no overlay; a github.com repo needs no overlay (D23)
         os.environ["FACTORY_PHASE"] = "build"
-        ctx = fl.repo_ctx(self.repo(cfg=None, verify=RED))
-        self.assertEqual(self.stop(ctx), (0, ""))
+        root = self.repo(cfg=None, verify=RED)
+        git(root, "remote", "set-url", "origin", "https://gitlab.example/o/r.git")
+        self.assertEqual(sv.handle(f'{{"cwd": "{root.as_posix()}"}}'), (0, ""))
         self.assertEqual(self.log_lines(), [])
-        self.assertFalse((ctx["root"] / ".factory" / "work").exists())
+        self.assertFalse((root / ".factory" / "work").exists())
+        git(root, "remote", "set-url", "origin", "git@github.com:o/r.git")
+        self.assertEqual(sv.handle(f'{{"cwd": "{root.as_posix()}"}}')[0], 2)  # no overlay: the build's verify still runs
 
     def test_ScriptEndToEnd(self):
         ctx = self.build_ctx(verify=RED)

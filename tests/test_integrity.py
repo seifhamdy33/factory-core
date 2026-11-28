@@ -16,7 +16,7 @@ def spec(**meta):
 
 def case(files=None, **events):
     pr = fixture("pr.json") | {"files": fixture("pr_files.json") if files is None else files}
-    ev = {"tier": None, "compare": fixture("compare_ahead.json"), "label_events": fixture("issue_events.json"),
+    ev = {"tier": None, "declared": 3, "compare": fixture("compare_ahead.json"), "label_events": fixture("issue_events.json"),
           "pins": fixture("pins.json"), "spec_blob": "blob104", "issue": 7} | events
     return pr, ev
 
@@ -116,13 +116,39 @@ class Integrity(unittest.TestCase):
         self.assertEqual([(fl_.code, fl_.kind, fl_.msg) for fl_ in flags],
                          [("I6", "fail", "needs a spec. Next: /factory:shape 7")])
 
-    def test_ApprovedT2Passes(self):
-        self.assertEqual("", self.i7(self.flags(tier=2)))
-        self.assertEqual("", self.i7(self.flags(tier=1, label_events=[], pins=[])))  # T1 needs no approval
+    def test_StacksAreData(self):  # D23: one row per stack; an overlay's patterns are added, never replace the core's
+        go = fl.load_cfg_text('tests = ["tests/**", "**/*_test.go"]\n'  # Go test files are test files here
+                              "[integrity]\nassert = ['\\bt\\.(?:Error|Fatal)f?\\(']\nskip = ['\\bt\\.Skip\\(']\n")
+        rows = [  # (cfg, test file, removed line, added line, expected I2 message start or None)
+            (CFG, "tests/test_a.py", "assert x == 1", "", "removed assertions"),
+            (CFG, "web/a.test.ts", "expect(x).toBe(1)", "", "removed assertions"),
+            (CFG, "web/a.test.ts", "", "it.only('x')", "added skip/only/todo"),
+            (CFG, "tests/test_a.py", "", "y = f()  # type: ignore", "added suppressions"),
+            (CFG, "pkg/a_test.go", 'if err != nil { t.Fatalf("x") }', "", None),  # Go is not a core stack
+            (go, "pkg/a_test.go", 'if err != nil { t.Fatalf("x") }', "", "removed assertions"),
+            (go, "pkg/a_test.go", "", 't.Skip("later")', "added skip/only/todo"),
+            (go, "tests/test_a.py", "assert x == 1", "", "removed assertions"),  # union: the core list still applies
+        ]
+        for cfg, name, rem, add, want in rows:
+            with self.subTest(name=name, rem=rem, add=add):
+                patch = "@@\n" + (f"-{rem}\n" if rem else "") + (f"+{add}\n" if add else "")
+                f = {"filename": name, "status": "modified", "additions": 1, "deletions": 1, "changes": 2, "patch": patch}
+                msgs = [x.msg for x in integrity.check({"files": [f], "number": 1}, None, cfg, {"tier": None}) if x.code == "I2"]
+                self.assertEqual([m.split(":")[0] for m in msgs], [want] if want else [])
 
-    def test_UnapprovedT2Fails(self):
+    def test_ApprovedT3Passes(self):
+        self.assertEqual("", self.i7(self.flags(tier=3)))
+        self.assertEqual("", self.i7(self.flags(tier=1, declared=1, label_events=[], pins=[])))  # T1 needs no approval
+
+    def test_OnlyDeclaredT3NeedsApproval(self):  # D23: T2 is approved in the session; a computed raise never asks
+        for declared, computed in ((2, 2), (2, 3), (0, 3), (None, 3)):
+            with self.subTest(declared=declared, computed=computed):
+                self.assertEqual("", self.i7(self.flags(tier=computed, declared=declared, label_events=[], pins=[])))
+        self.assertIn("no spec-approved label event", self.i7(self.flags(tier=3, declared=3, label_events=[], pins=[])))
+
+    def test_UnapprovedT3Fails(self):
         pr, ev = case(tier=2, label_events=[], pins=[])
-        pr["labels"] = [{"name": "tier:T2"}]
+        pr["labels"] = [{"name": "tier:T3"}]
         msg = self.i7(integrity.check(pr, spec(), CFG, ev))
         self.assertIn("no spec-approved label. Next: as the-approver, review the spec and add spec-approved", msg)
         self.assertIn("set authority.approver", self.i7(integrity.check(
