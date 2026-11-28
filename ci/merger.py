@@ -35,8 +35,11 @@ def coverage(api, cfg, pr):
 def mutation_ceiling(cfg):
     """D26: the recorded mutation score caps the ceiling. >= 60% T1, 40-59% T0, below 40% no auto-merge (-1).
     No score recorded (no /factory:onboard sample yet): T0, which needs no tests."""
-    score = (cfg.get("mutation") or {}).get("score")
-    return 0 if not isinstance(score, (int, float)) else 1 if score >= 60 else 0 if score >= 40 else -1
+    m = cfg.get("mutation")
+    score = m.get("score") if isinstance(m, dict) else None
+    if not isinstance(score, (int, float)) or isinstance(score, bool):
+        return 0
+    return 1 if score >= 60 else 0 if score >= 40 else -1
 
 def checks_red(api, head):
     """Every check run and commit status on the head must be green, and both factory statuses present."""
@@ -52,7 +55,8 @@ def decide(api, n, owner):
     agents, ceiling = au["agents"] or [owner, "claude[bot]", "factory-agent[bot]"], au["auto_merge_ceiling"]
     if capped := (cap := mutation_ceiling(cfg)) < ceiling:
         ceiling = cap
-    ceil = f"auto_merge_ceiling T{ceiling}" + (" (capped by the mutation score)" if capped else "")
+    ceil = ("no auto-merge (mutation score below 40%)" if ceiling < 0 else
+            f"auto_merge_ceiling T{ceiling}" + (" (capped by the mutation score)" if capped else ""))
     if pr.get("state") != "open" or pr.get("draft"):
         why.append("not an open, ready PR")
     if login not in agents:

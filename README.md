@@ -240,7 +240,7 @@ Comments are never trusted as approval, because any workflow can post as `github
 
 `metrics/report.py` reads the repo's closed PRs through `gh api` (run it in the repo, or pass `--repo o/r`):
 - **monthly** (`--days 30`, `--out FILE`): per tier, merged and auto-merged PRs, rework, escaped, change failure, tokens per change (from the ledger), lead time, review time, rubber-stamps and gate yield. Definitions: D26 and the report's last line.
-- **`--weekly`:** 1 in 5 auto-merged T0/T1 PRs of the past 7 days, the same picks all week. Read each and label it `audit:ok` or `escaped`; the monthly report counts both.
+- **`--weekly`:** 1 in 5 auto-merged T0/T1 PRs of the last complete ISO week (or `--week 2026-W48`), the same picks on every run. Read each and label it `audit:ok` or `escaped`; the monthly report counts both.
 
 ## Configuration reference
 

@@ -99,7 +99,10 @@ class Merger(unittest.TestCase):
                 self.assertIn(want, out)
         merged, out = self.run_merger(routes([DOC], "[mutation]\nscore = 39\n"))
         self.assertEqual(merged, [])
-        self.assertIn("T0 > auto_merge_ceiling T-1 (capped by the mutation score)", out)
+        self.assertIn("T0 > no auto-merge (mutation score below 40%)", out)
+        for bad in ("mutation = 60\n", "[mutation]\nscore = true\n"):  # malformed: T0, never a crash
+            with self.subTest(bad=bad):
+                self.assertIn("T0 <= auto_merge_ceiling T0", self.run_merger(routes([DOC], bad))[1])
 
     def test_HeadConfigIgnored(self):  # main's ceiling, never the PR's: no base config means the core default T0
         r = routes([CODE], pr={"body": "Closes #7"}, report="SF:src/app.py\nDA:2,1\nDA:3,1\n",

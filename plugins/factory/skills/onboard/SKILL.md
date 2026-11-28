@@ -22,13 +22,16 @@ answer, and give a recommended option.
    run. If CI doesn't upload one, add the smallest steps that do, or set `[coverage] artifact`/`path` to what it
    already uploads. Without a report, every code change counts as T2 for the merger.
 4. **Mutation sample.** Pick up to 3 source modules changed most in the last 90 days (`git log --since=90.days
-   --name-only`, without tests, docs and gate files). Run the stack's mutation tool on them (mutmut for Python,
-   Stryker for JS/TS, cargo-mutants for Rust, go-mutesting for Go) for at most 15 minutes in all. Install it only
-   outside the repo (a temporary venv, `npx`), never as a dependency. Hand long output to log-reader.
+   --name-only`, without tests, docs and gate files). Run the stack's mutation tool on them for at most 15 minutes
+   in all: Python mutmut (pytest, POSIX or WSL only) or cosmic-ray (any test command, Windows too), Stryker for
+   JS/TS, cargo-mutants for Rust, go-mutesting for Go. Install it only outside the repo (a temporary venv, `npx`),
+   never as a dependency, and run it on a throwaway copy (`git worktree add "$(mktemp -d)/m"`): some tools
+   mutate files in place; remove it after (`git worktree remove --force`). Hand long output to log-reader.
    - score = killed / (killed + survived), as a percent; timeouts count as killed; mutants with no covering test
      count as survived.
    - Record it: `[mutation]` `score`, `date` (YYYY-MM-DD), `tool` (with version), `sample` (the module paths).
-   - Ceiling: score ≥ 60 → `[authority] auto_merge_ceiling = 1`; 40–59 → `0`; under 40 → `-1` (no auto-merge), and
+   - Ceiling (the one value onboard may raise, at most to 1): score ≥ 60 → `[authority] auto_merge_ceiling = 1`;
+     40–59 → `0`; under 40 → `-1` (no auto-merge), and
      open an issue "Raise verification: mutation score <n>%" naming the modules and the survivors worth a test.
      The merger enforces this cap from the recorded score; with no score it allows T0 only.
    - If no tool runs on this stack, record no score, set the ceiling to `0`, and say why in the PR.
@@ -42,10 +45,10 @@ answer, and give a recommended option.
 8. **PR.** On branch `factory/onboard`, one commit, then `gh pr create`. The body holds:
    - a table of each overlay value with its reason;
    - the verify output and the mutation result (tool, sample, score, ceiling);
-   - what only the owner can do: the merger App, `MERGER_CLIENT_ID`, `MERGER_APP_KEY` (README section 6), when
-     `gh variable list` doesn't show them.
+   - what only the owner can do: the merger App and `MERGER_CLIENT_ID` (README section 6) when `gh variable list`
+     doesn't show it, and a reminder to check the `MERGER_APP_KEY` secret (don't list or read secrets).
    It changes gate files, so it is T3: the owner reviews and merges it.
 
 ## Rules
-- Never push to the default branch, merge, or change repo settings.
+- Never push to the default branch, merge, or change repo settings. Creating labels and issues is allowed.
 - Never read `.env` files or secrets. Never add a dependency to the repo for the factory's own use.
