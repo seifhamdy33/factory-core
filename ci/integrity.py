@@ -4,7 +4,9 @@ pr     GitHub PR object plus "files" (list PR files, with patches) and "files_tr
 spec   None, or {"meta", "sections", "path" (spec file at head; None for an issue-body spec), "issue"}.
 events {"tier": final tier or None (first pass), "declared": declared tier (issue label or spec; only I7 reads it),
         "compare": compare(spec_commit...head) JSON or None, "label_events": issue events,
-        "pins": [{"run": {"event", "path"}, "pin": pin.json}], "spec_blob": sha}.
+        "pins": [{"run": {"event", "path"}, "pin": pin.json}], "spec_blob": sha,
+        "acc_lock": None or {"glob": the base config's acceptance_glob, "first": the PR commit that first touched it,
+                    "compare": compare(first...head) JSON or None}}.
 Comments are never an input: a comment can be posted by any workflow as github-actions[bot]."""
 import collections, re, sys
 from pathlib import Path
@@ -41,6 +43,16 @@ def i1_locked(spec, events):
             if n != spec.get("path") and (g := fl.any_match(locked, n))]  # the spec file is guarded by I7
     return [Flag("I1", "fail", f"locked files changed after spec_commit: {short(hits)}. "
                                "Next: revert them; if a test is wrong, write it under ## Spec issues")] * bool(hits) + cut
+
+def i1_acceptance(lock):  # A3: CI's own lock, from the base config and the PR's commits, never from the spec
+    if not lock:
+        return []
+    if not lock.get("compare"):
+        why = f"since {lock['first'][:12]}" if lock.get("first") else "250+ commits; the API lists 250"
+        return [Flag("I1", "raise:T2", f"could not check the acceptance tests ({why})")]
+    hits = [n for f in lock["compare"].get("files", []) for n in names(f) if fl.any_match([lock["glob"]], n)]
+    return [Flag("I1", "raise:T2", f"acceptance tests changed after the commit that added them ({lock['first'][:12]}): "
+                                   f"{short(hits)}. Fine for a re-shape; otherwise revert them")] * bool(hits)
 
 def patterns(cfg, key, base):
     return re.compile("|".join(f"(?:{p})" for p in [*base, *cfg["integrity"].get(key, [])]))
@@ -96,6 +108,7 @@ def i7_approval(pr, spec, cfg, events):
 def check(pr, spec, cfg, events):
     files, tier, out = pr.get("files", []), events.get("tier"), []
     out += i2_test_edits(pr, cfg)
+    out += i1_acceptance(events.get("acc_lock"))
     if th := [n for f in files for n in names(f) if fl.any_match(cfg["integrity"]["threshold_globs"], n)]:
         out.append(Flag("I3", "raise:T2", f"coverage/lint threshold config changed: {short(th)}"))
     if spec:

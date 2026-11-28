@@ -33,6 +33,16 @@ class Integrity(unittest.TestCase):
     def i7(self, flags):
         return next((fl_.msg for fl_ in flags if fl_.code == "I7"), "")
 
+    def test_AcceptanceLockFromBaseConfig(self):  # audit A3: the lock doesn't depend on the agent-editable spec
+        lock = {"glob": "tests/acceptance/test_7_*", "first": "c1" * 20,
+                "compare": {"status": "ahead", "files": [{"filename": "tests/acceptance/test_7_a.py", "status": "modified"}]}}
+        flags = self.flags(spec(locked=[], spec_commit=None), files=[], tier=1, declared=1, acc_lock=lock)
+        self.assertEqual([(f.code, f.kind) for f in flags], [("I1", "raise:T2")])
+        self.assertIn("acceptance tests changed after the commit that added them (c1c1c1c1c1c1): tests/acceptance/test_7_a.py", flags[0].msg)
+        clean = lock | {"compare": {"status": "ahead", "files": [{"filename": "src/app.py", "status": "modified"}]}}
+        self.assertEqual(self.flags(None, files=[], tier=0, declared=0, acc_lock=clean), [])  # no spec needed: CI's own lock
+        self.assertEqual(codes(self.flags(None, files=[], tier=0, declared=0, acc_lock=lock | {"compare": None})), ["I1"])
+
     def test_Baseline(self):
         flags = self.flags(tier=2)
         self.assertEqual([(fl_.code, fl_.kind) for fl_ in flags], [("I2", "raise:T2")])  # fixture deletes one assert

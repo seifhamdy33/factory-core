@@ -1,9 +1,10 @@
 <!-- Packet template. Use this repo's [packet.headings] in place of the defaults below, add every [packet] extra
-heading, keep it at or under [packet] max_lines (default 40), and delete this comment. fx ship adds "Closes #<id>".
+heading, keep it at or under [packet] max_lines (default 40), and delete this comment. fx ship adds the verify
+lines, the head SHA and "Closes #<id>".
 Paired change (state.json has a `parent`): if a sibling slice's PR in another repo must merge first, name it under
 Needs you, e.g. "- <api PR url>: merge it first; this PR's contract check fails until then". -->
 Tier: T<n> (declared T<a>; CI computes the final tier)
-Review: <reviewer>, <n> findings
+Review: <reviewer>, <n> findings (T2+: the reviews your setup runs; not checked by fx)
 ## Intent
 <1–2 lines: what is true now that wasn't before>
 ## Acceptance checks

@@ -18,8 +18,7 @@ class Templates(FactoryTest):
 
     def test_PacketTemplatePassesCheckAtT2(self):
         text, cfg = (T / "packet.md").read_text("utf-8"), fl.load_cfg_text("")
-        self.assertEqual(len(fl.packet_check(text, cfg, 2)), 1)  # the unfilled "<n> findings" placeholder fails
-        self.assertEqual(fl.packet_check(text.replace("<n> findings", "2 findings"), cfg, 2), [])
+        self.assertEqual(fl.packet_check(text, cfg, 2), [])  # D27 (B2): the Review line is asked for, not checked
 
     def test_VerifyTemplateFollowsContract(self):
         root = self.repo(verify=(T / "verify.sh").read_text("utf-8"))

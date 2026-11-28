@@ -121,6 +121,14 @@ class Config(unittest.TestCase):
         strict = fl.load_cfg_text('[coverage]\nchanged_lines_min = 95\n')
         self.assertEqual((strict["coverage"]["changed_lines_min"], strict["authority"]["auto_merge_ceiling"]), (95, 0))
 
+    def test_NonFiniteNumbersFallBack(self):  # audit A1: nan compares False both ways, so it switched the checks off
+        for v in ("nan", "inf", "-inf", "true"):
+            with self.subTest(v):
+                c = fl.load_cfg_text(f'[coverage]\nchanged_lines_min = {v}\n[authority]\nauto_merge_ceiling = {v}\n')
+                self.assertEqual((c["coverage"]["changed_lines_min"], c["authority"]["auto_merge_ceiling"]), (80, 0))
+        self.assertEqual(fl.load_cfg_text('[authority]\nauto_merge_ceiling = -5\n')["authority"]["auto_merge_ceiling"], -1)
+        self.assertEqual(fl.load_cfg_text('[authority]\nauto_merge_ceiling = 0.5\n')["authority"]["auto_merge_ceiling"], 0)
+
     def test_ParseIssue(self):
         self.assertEqual(fl.parse_issue("f/{issue}-{slug}", "f/12-add-x"), "12")
         self.assertEqual(fl.parse_issue("{type}/{issue}-{slug}", "fix/3-a"), "3")
@@ -335,8 +343,8 @@ class Packet(unittest.TestCase):
         self.assertEqual(fl.packet_check(base.replace("### Checklist", "") + "## Follow-ups\nNot verified: a\n", cfg, 1),
                          ["missing heading '### Checklist'"])
 
-    def test_ReviewLineT2(self):
-        self.assertIn("Review:", fl.packet_check(packet(), self.cfg, 2)[0])
+    def test_ReviewLineNotRequired(self):  # D27 (B2): self-reported text is never a gate (brief section 4)
+        self.assertEqual(fl.packet_check(packet(), self.cfg, 3), [])
         self.assertEqual(fl.packet_check(packet(needs_you="Review: /code-review medium, 2 findings"), self.cfg, 2), [])
         self.assertEqual(fl.packet_check(packet(needs_you="Review: fresh-context subagent, 0 findings"), self.cfg, 2), [])
 
