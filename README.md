@@ -142,6 +142,18 @@ Shape and build run in the background, and the PR appears when the build ships. 
 ### A change across repos (workspace)
 In a workspace repo whose config has a `[workspace]` table, the kickoff labels the issue `factory:parent`. After the interview it files one slice issue per repo, each with a `Parent: <repo>#<n>` line and linked as a sub-issue, and runs `fx shape <key>#<m>` for each slice. `fx` in the workspace lists every repo and says which PR must merge first.
 
+### What works where
+The issue and the PR are the interface. Any surface that can write the issue can kick off.
+
+| Surface | Kick off | T2/T3 interview | Shape and build | Blocker reaches you as |
+|---|---|---|---|---|
+| Terminal (`claude` in the repo) | `factory: …` or `/factory:idea` | In the session (your spec skill, else questions) | `fx shape`: background sessions in a worktree | Issue comment, `fx` status |
+| GitHub, web or mobile (setup step 5) | Issue with `tier:T<n>` and `Done when:`, then the `factory` label | `@factory` in the issue or a comment; answers in comments | One Actions run in the checkout, a fresh session per phase | Issue comment |
+| Slack Claude Tag (Team/Enterprise), not tried | Have it open the issue, then add `factory` | As GitHub | As GitHub | As GitHub |
+| claude.ai cloud session | Not supported: open the issue from GitHub mobile | Not supported | Not supported | n/a |
+
+A cloud session can't write the issue: issue and comment writes return 403, and `gh`'s GraphQL calls are blocked. A Claude-written PR on GitHub can also be watched with the built-in Auto-fix (`/autofix-pr` on claude.ai; not tried here). The GitHub surface needs a repo you own personally; the PR is opened by `claude[bot]`, so the gates run on it.
+
 ### `fx` commands
 | Command | What it does |
 |---|---|
