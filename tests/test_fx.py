@@ -397,6 +397,30 @@ class Flows(FactoryTest):
         self.assertIn("o/r has no default branch yet (an empty repo)\nNext: push a first commit, then fx shape 7", err)
         launch.assert_not_called()
 
+    def test_ActionSurfaceRunsInTheCheckout(self):  # templates/factory-agent.yml: the workflow runs the sessions
+        main = self.main_repo(cfg='project = "demo"\n')
+        self.remote_head(main)
+        nxt = self.tmp / "next-prompt.txt"
+        fake = FakeRun({"gh issue view": {"title": "Add the Thing", "labels": [], "body": "",
+                                          "author": {"login": "Boss"}}})
+        with mock.patch.dict(os.environ, {"FACTORY_NEXT": str(nxt), "FACTORY_OWNER": "boss"}), \
+                contextlib.ExitStack() as st, contextlib.chdir(main):
+            st.enter_context(mock.patch.object(fx, "run", fake))
+            real, bg = fx.subprocess.run, []
+            st.enter_context(mock.patch.object(fx.subprocess, "run", lambda cmd, *a, **k: bg.append(cmd) if "--bg" in cmd
+                                               else real(cmd, *a, **k)))
+            code, out, err = call("shape", "7")
+            self.assertEqual(code, 0, err)
+            self.assertEqual(bg, [])  # no claude --bg
+            self.assertFalse(fake.has("gh", "api", "user"))  # the owner comes from the workflow: app tokens can't read /user
+            self.assertFalse(fake.has("git", "worktree"))
+            self.assertEqual(fl.git(main, "branch", "--show-current"), "f/7-add-the-thing")  # the action's cwd
+            self.assertEqual(nxt.read_text("utf-8"), "/factory:shape 7")
+            self.assertIn(f"Next shape prompt written to {nxt}", out)
+            self.assertEqual(fl.load_json(main / ".factory" / "work" / "7" / "state.json")["phase"], "shape")
+            self.assertEqual(fx.worktrees(fl.repo_ctx(main)), {"7": main.resolve()})  # fx build finds the checkout
+            self.assertEqual(call("shape", "7")[0], 0)  # a rerun stays on the branch
+
     def test_LaunchStartsABackgroundSession(self):  # D23: no model flags; fx returns at once and records the session
         main, wt, ctx = self.worktree()
         ok = mock.Mock(returncode=0, stdout="backgrounded \u00b7 3ed22d67-a1b2\n  claude agents  list sessions\n", stderr="")

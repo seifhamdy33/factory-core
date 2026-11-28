@@ -117,6 +117,11 @@ For the CI gates, or to change defaults, make these changes in one PR and review
 5. Create the `spec-approved` label (`gh label create spec-approved`). The kickoff creates the `tier:`, `type:` and `factory:parent` labels it uses.
 6. Optional: `setup` (a dependency install that `fx shape` runs once per worktree), `branch_types`, a trimmed `CLAUDE.md`, and CODEOWNERS for gate files.
 
+### 5. Optional: run it on GitHub (kick off from the phone)
+1. In a `claude` session in the repo, run `/install-github-app`. It installs the Claude GitHub app and stores the `CLAUDE_CODE_OAUTH_TOKEN` secret (runs bill to your subscription).
+2. Copy `plugins/factory/templates/factory-agent.yml` to `.github/workflows/factory-agent.yml` and fill in `__FACTORY_CORE_REPO__` and `__FACTORY_CORE_SHA__` as for the gates.
+3. Create the `factory` label. Then open an issue as you would for the kickoff (a `tier:T1` label and a `Done when:` line) and add `factory`: the workflow shapes and builds it to a PR, with the hooks in force. Only the repo owner's label starts a run.
+
 ## Using it
 
 ### A T1 change
@@ -268,6 +273,8 @@ Template: `user/factory.toml`.
 ### Environment variables
 - **`FACTORY_HOME`** moves `~/.factory`.
 - **`FACTORY_PHASE`** is set by `fx` (`shape` or `build`) and turns the hooks on.
+- **`FACTORY_NEXT`** (set by `factory-agent.yml`): `fx` writes the next session's prompt to this file instead of starting `claude --bg`, and works in the checkout instead of a worktree.
+- **`FACTORY_OWNER`**: the login G6 treats as the owner, instead of `gh api user` (which an app token can't call).
 - **`CLAUDE_CONFIG_DIR`** moves `~/.claude`. `fx` and `ledger.py` honor it.
 
 ### Where state lives

@@ -229,6 +229,19 @@ class WorkflowFiles(unittest.TestCase):
         for ref in refs:
             self.assertRegex(ref, r"@([0-9a-f]{40}|__FACTORY_CORE_SHA__)$")
 
+    def test_AgentTemplateIsSafe(self):  # templates/factory-agent.yml: runs Claude with write tokens, so keep it tight
+        text = (CORE / "plugins" / "factory" / "templates" / "factory-agent.yml").read_text("utf-8")
+        on = text.split("\non:", 1)[1].split("\npermissions:", 1)[0]
+        self.assertEqual([ln.strip() for ln in on.splitlines() if ln.strip().endswith(":")], ["issues:"])
+        self.assertIn("\npermissions: {}\n", text)
+        self.assertIn("if: github.event.label.name == 'factory' && github.event.sender.login == github.repository_owner",
+                      text)  # only the owner's own label starts a run (G6)
+        self.assertNotRegex(text, r"run:.*\$\{\{ *github\.event")  # no event text in a shell line
+        self.assertNotIn("secrets.GITHUB_TOKEN", text)
+        for ref in re.findall(r"^\s*(?:- )?uses: (\S+)", text, re.M):
+            self.assertRegex(ref, r"@[0-9a-f]{40}$")
+        self.assertIn('echo "FACTORY_NEXT=$RUNNER_TEMP/factory-next-prompt" >> "$GITHUB_ENV"', text)  # no `claude --bg`
+
     def test_ActionRunsGates(self):
         text = (CORE / "ci" / "action.yml").read_text("utf-8")
         self.assertIn('run: python3 "$GITHUB_ACTION_PATH/gates.py"', text)
