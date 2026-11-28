@@ -38,8 +38,8 @@ found in it.
    T2/T3: write the agreed spec with this frontmatter to `specs_dir`/`spec_name` (`{issue}`, `{slug}` from the
    branch, `{date}` as YYYY-MM-DD), at most 60 lines without the frontmatter, and commit it alone:
    `docs(#<n>): spec`. With no agreed spec in the issue: Blocker.
-7. **Hand off.** Run `fx build <n>`, then end your turn. If `fx` is not on PATH, run
-   `${CLAUDE_PLUGIN_ROOT}/../../bin/fx`.
+7. **Hand off.** Run `fx build <n>`, then end your turn. If `fx` is not on PATH, run the path in the `fx` key
+   of `.factory/work/<n>/state.json`.
 
 ## Blocker
 Write a `## Blocker` section in the notes with the question and your best guess. Post the same text as an issue

@@ -126,7 +126,7 @@ def cmd_shape(a):
         run(["git", "worktree", "add", wt, branch] if has else ["git", "worktree", "add", "-b", branch, wt, "origin/HEAD"], main)
     m, w = re.search(r"^Parent: (\S+#\d+)\s*$", iss.get("body") or "", re.M), fl.repo_ctx(wt)
     fl.save_state(w, issue=n, repo=repo, branch=branch, worktree=str(wt), parent=m and m.group(1),
-                  phase="shape", tier=label_tier(iss["labels"]))
+                  phase="shape", tier=label_tier(iss["labels"]), fx=(CORE / "bin" / "fx").as_posix())  # shape's PATH fallback
     cmd = shlex.split(cfg["setup"]) if isinstance(cfg["setup"], str) else cfg["setup"]  # an argv list or one string
     if cmd and not w["state"].get("setup_done"):  # once per worktree, e.g. install dependencies
         print(f"Setting up the worktree: {' '.join(cmd)}", flush=True)
