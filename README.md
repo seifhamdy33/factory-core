@@ -38,7 +38,7 @@ flowchart LR
 1. **Kickoff.** In any Claude session in the repo, ask for the factory, for example "factory: reject negative quantities in the cart API" or `/factory:idea …`. Claude files an issue with a 1–3 line intent, a `Done when:` line and a `tier:T<n>` label, and creates any missing labels.
    - **T2/T3:** Claude interviews you first. If your setup has a spec or design workflow (a skill or a CLAUDE.md rule), it uses that; otherwise it asks in rounds of up to four questions, recommended option first. The agreed spec goes into the issue. **Your yes to the spec is the approval to build.**
    - Then Claude runs `fx shape`, which returns at once.
-2. **Shape (unattended).** `fx shape <n>` creates a branch and worktree on the default branch (`origin/HEAD`) and runs the repo's `setup` command once. Then it starts a background session (`claude --bg`) on `/factory:shape <n>` and prints `Watch: claude attach <id>`. The session:
+2. **Shape (unattended).** `fx shape <n>` acts only on an issue you opened, or one that you or the approver labelled `ready` (and never on a `triage` issue without `ready`). It creates a branch and worktree on the default branch (`origin/HEAD`) and runs the repo's `setup` command once. Then it starts a background session (`claude --bg`) on `/factory:shape <n>` and prints `Watch: claude attach <id>`. The session:
    - writes `.factory/verify` if the repo has none;
    - writes the acceptance tests and runs the **red check**: each test must fail, for the stated reason, before any code exists;
    - commits the tests alone (that commit becomes `spec_commit`);
@@ -306,6 +306,7 @@ Template: `user/factory.toml`.
 | `claude --bg did not start: Workspace not trusted` | Run `claude` once in the repo's main checkout and accept the prompt, then rerun |
 | A background session seems stuck | `claude attach <id>` (the id is in the `Watch:` line and in `state.json`). It may be waiting on a permission prompt: see the assumptions under Setup. |
 | `fx` lists a Blocker | Read the notes or the issue comment, answer on the issue or fix the cause, then `fx build <n>` |
+| `fx shape` or `fx build` says the owner hasn't marked it ready, or that it was edited after (G6) | Someone else opened or edited the issue, or it is labelled `triage`. Read it; if it should be built, add `ready` yourself or as the approver (if it is already on, remove it and add it again) |
 | `lock-timeout` | Another worktree's verify holds the slot or lock. Wait, or raise `verify_slots` in `~/.factory/config.toml`. |
 | `no-verify-script` | The repo has no `.factory/verify`: `fx shape` again lets the shape session write one, or add it in its own reviewed PR |
 | I6 "needs a spec" on a hand-made PR | Expected for T1+ without a factory spec; start it through the factory, or keep it T0 |

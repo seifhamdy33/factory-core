@@ -25,7 +25,7 @@ class FakeRun:
     """Stands in for fx.run: answers gh calls from `gh`, records everything, runs real git unless faked."""
 
     def __init__(self, gh=None, fake_git=("push", "fetch")):
-        self.gh, self.fake_git, self.calls = gh or {}, fake_git, []
+        self.gh, self.fake_git, self.calls = {"gh api user": "owner", **(gh or {})}, fake_git, []
 
     def __call__(self, cmd, cwd=None):
         cmd = [str(c) for c in cmd]
@@ -33,6 +33,8 @@ class FakeRun:
         if cmd[0] == "gh":
             key = next((k for k in self.gh if " ".join(cmd).startswith(k)), None)
             val = self.gh.get(key, "")
+            if key == "gh issue view" and isinstance(val, dict):  # issues are the owner's unless a test says not (G6)
+                val = {"author": {"login": "owner"}, **val}
             return val if isinstance(val, str) else json.dumps(val)
         if cmd[0] == "git" and cmd[1] in self.fake_git or cmd[0] != "git":
             return ""
@@ -278,6 +280,45 @@ class Flows(FactoryTest):
         code, _, err, launch = self.fx_in(main, fake, "shape", "7")
         self.assertEqual(code, 1)
         self.assertIn("#7 is a workspace parent: /factory:idea split it into slices\nNext: fx shape <key>#<slice>", err)
+        launch.assert_not_called()
+
+    def test_ShapeIntakeGuard(self):  # G6: only the owner's issues, or ones the owner or approver marked ready
+        main = self.main_repo(cfg='project = "demo"\n[authority]\napprover = "Boss"\n')  # logins ignore case
+        self.remote_head(main)
+        add, again = "add the ready label to #7", "remove the ready label from #7 and add it again"
+        cases = [  # (author, labels, `ready` labelers in order, body editors, refusal or None)
+            ("owner", [], [], ["stranger"], None),  # the owner's own issue: no ready needed
+            ("owner", ["triage"], [], [], ("is labelled triage", add)),
+            ("stranger", [], [], [], ("was opened by stranger", add)),
+            ("app/sentry", ["ready"], ["stranger"], [], ("was opened by app/sentry", again)),  # not the owner's ready
+            ("stranger", ["ready"], ["boss"], [], None),  # the approver's ready counts
+            ("stranger", ["ready", "triage"], ["owner"], ["stranger@1", "owner@3"], None),  # edited before ready, or by us
+            ("stranger", ["ready"], ["owner", "stranger"], [], ("was opened by stranger", again)),  # the latest decides
+            ("stranger", [], ["owner"], [], ("was opened by stranger", add)),  # ready was removed again
+            ("stranger", ["ready"], ["owner"], ["stranger@3"], "edited"),  # changed after the owner read it
+        ]
+        for author, labels, by, edits, refused in cases:
+            with self.subTest(author=author, labels=labels, by=by, edits=edits):
+                stamp = lambda e: f"{e.split('@')[0]} 2026-01-0{e.split('@')[1] if '@' in e else 2}T00:00:00Z"
+                fake = FakeRun({"gh issue view": {"title": "Add the Thing", "author": {"login": author}, "body": "",
+                                                  "labels": [{"name": lb} for lb in labels]},
+                                "gh api --paginate repos/o/r/issues/7/events": "\n".join(map(stamp, by)),
+                                "gh api graphql": "\n".join(map(stamp, edits))})
+                code, _, err, launch = self.fx_in(main, fake, "shape", "7")
+                self.assertEqual((code, launch.called), (1, False) if refused else (0, True), err)
+                if refused == "edited":
+                    self.assertIn("#7 was edited by stranger after it was marked ready (G6)\nNext: read #7 again; if it"
+                                  f" is still right, as Boss or owner, {again}, then fx shape 7", err)
+                elif refused:
+                    self.assertIn(f"#7 {refused[0]}, and the owner hasn't marked it ready (G6)\n"
+                                  f"Next: as Boss or owner, {refused[1]}, then fx shape 7", err)
+
+    def test_BuildIntakeGuard(self):  # G6 again at build: the body may change between shape and build
+        _, wt, _ = self.worktree()
+        fake = FakeRun({"gh issue view": {"title": "T", "author": {"login": "stranger"}, "body": "", "labels": []}})
+        code, _, err, launch = self.fx_in(wt, fake, "build", "7")
+        self.assertEqual(code, 1)
+        self.assertIn("Next: as owner, add the ready label to #7, then fx build 7", err)
         launch.assert_not_called()
 
     def test_ShapeCreatesWorktreeAndState(self):
