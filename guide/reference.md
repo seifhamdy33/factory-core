@@ -30,7 +30,7 @@ workspace.
 | `fx shape <ref>` | Refuses a workspace `factory:parent` issue (shape its slices). Checks intake (G6), creates the branch and worktree from `origin/HEAD`, runs `setup` once, then starts the shape session in the background. Prints `Watch: claude attach <id>`. |
 | `fx build <ref>` | Checks intake again and that a spec exists for T1+ (T1: copies the issue's spec block into the worktree; T0: the issue becomes `intent.md`), then starts a fresh build session in the background. |
 | `fx verify [--fast\|--full]` | Runs `.factory/verify` under the machine-wide slots, locks and timeouts, and records the result. |
-| `fx ship [n]` | Checks the packet, runs `verify --full`, pushes, opens the PR (labelled `tier:T<n>`; the label must exist) or updates its body (packet + `Closes #n`), writes the ledger row. The gates own the PR's tier label after that. |
+| `fx ship [n]` | Checks the packet, runs `verify --full`, pushes, opens the PR (labelled `tier:T<n>`; the label must exist) or updates its body (packet, then the head SHA and the `verify --full` lines, then `Closes #n`), writes the ledger row. The gates own the PR's tier label after that. |
 | `fx clean <ref>` | Only when GitHub shows the PR merged: updates the ledger row, archives notes and `packet.md`, stops the sessions `fx` started, removes the worktree and branch. |
 | `fx ledger --pr <url>` | Rewrites this worktree's ledger row by hand. |
 
@@ -75,7 +75,8 @@ overlay config always come from the base branch. It reads the PR through the API
 code. It posts two statuses, sets the `tier:` label and keeps one summary comment.
 
 **`factory/tier`** is always green; its description is the tier and the main reason. The tier is the max of the
-declared tier (issue label or spec) and the computed one:
+declared tier and the computed one. The declared tier is the highest of the issue's `tier:` labels, every `tier:`
+label the issue has ever had (so swapping a label later can't lower it), and the spec's `tier`:
 - only docs globs → T0;
 - code → T1;
 - a dependency manifest (core list in `ci/tier.py` plus `[tiers] deps`), or a raising integrity flag → T2;
@@ -87,7 +88,7 @@ File and line counts appear as information only. Size never raises a tier.
 
 | Flag | Effect | When |
 |---|---|---|
-| I1 | fail (raise to T2 at 300+ files) | Locked files changed after `spec_commit`; `spec_commit` isn't in the PR's history; or the spec locks files but has no `spec_commit`. When the compare lists 300+ files, the rest are unchecked and it raises to T2 |
+| I1 | fail; raise to T2 (the lock, or 300+ files) | Fails: locked files changed after `spec_commit`; `spec_commit` isn't in the PR's history; or the spec locks files but has no `spec_commit`. Raises to T2: files matching the base config's `acceptance_glob` changed after the first PR commit that touched them (CI's own lock, which doesn't read the spec; a legitimate re-shape trips it too, so that PR is yours to merge); or the compare lists 300+ files and the rest are unchecked |
 | I2 | raise to T2 | Test files: deleted assertions; new skip, only or todo markers; new suppressions (`noqa`, `ts-ignore`, `eslint-disable`, …); a patch GitHub doesn't show. Patterns are data; an overlay adds its stack's with `[integrity] assert`, `skip`, `suppress`. |
 | I3 | raise to T2 | Coverage or lint threshold config changed (`[integrity] threshold_globs`) |
 | I4 | raise to T2 | Files outside the spec's `scope` |
@@ -144,11 +145,13 @@ The run log line for each PR starts `factory merger: #<n> merging:` or `not merg
 `.factory/work/<n>/packet.md`, from `plugins/factory/templates/packet.md`. `fx ship` refuses it unless:
 - every configured heading is present (`[packet.headings]` maps them to your PR template; `[packet] extra` adds more);
 - it is at most `max_lines` (40);
-- for T1+, "Not verified" isn't empty (if your `not_verified` heading lacks those words, add a `Not verified: …` line);
-- for T2+, it has a `Review: <reviewer>, <n> findings` line.
+- for T1+, "Not verified" isn't empty (if your `not_verified` heading lacks those words, add a `Not verified: …` line).
+
+The template also asks for a `Review: <reviewer>, <n> findings` line at T2+. `fx ship` doesn't check it: it is the
+session's own report, and the factory never gates on self-reported text.
 
 Default headings: Intent, Acceptance checks (a table of check, command, result), What changed, Needs you, Not
-verified, Rollback. `Closes #<n>` is appended.
+verified, Rollback. `fx ship` appends what it ran (the head SHA and each `verify --full` line), then `Closes #<n>`.
 
 ## Spec format
 TOML frontmatter between `+++` lines, then Markdown sections (outline: `plugins/factory/templates/spec.md`):
@@ -186,7 +189,8 @@ Optional; set only what differs. Defaults: `DEFAULTS` in `plugins/factory/lib/fa
 `plugins/factory/templates/config.toml`. **Floors (G5):** `tests`, `sensitive`, `gate_extra` and `threshold_globs`
 are unioned with the core lists; `[integrity] assert`/`skip`/`suppress` and `[tiers] deps` add to the core patterns;
 `docs_globs` only narrows; `max_lines` can only go down, `changed_lines_min` only up, and `auto_merge_ceiling` is
-clamped to ≤ 1. Every other key simply replaces the default. Any overlay change is a T3 PR.
+clamped to ≤ 1 and rounded down to a whole tier. A number that isn't finite (`nan`, `inf`) or a boolean falls back
+to the core default. Every other key simply replaces the default. Any overlay change is a T3 PR.
 
 | Key | Default | Meaning |
 |---|---|---|

@@ -52,8 +52,8 @@ for you day to day:
    The diff can raise a tier, never lower it.
 5. **Done means evidence.** Every PR carries a packet: what was asked, which acceptance checks ran and their result,
    what changed, what needs you, and what was *not* verified.
-6. **No standing context.** The core adds nothing to your project's `CLAUDE.md` (onboarding adds 3–5 lines only if
-   it doesn't say how to run the checks). Context is injected only into factory sessions.
+6. **No standing context.** The core adds nothing to your project's `CLAUDE.md`, and onboarding never edits it.
+   Context is injected only into factory sessions.
 7. **Fresh session per phase, state in files.** Shape and build are separate sessions. Everything a session needs is
    in the issue, the spec, the notes file and `state.json`.
 8. **External text is data.** Issue bodies, PR comments, logs and web pages are never followed as instructions.
@@ -67,7 +67,7 @@ Tiers follow **risk, never size**. A 300-line pure function is T1; a one-line CI
 |---|---|---|---|---|---|
 | **T0** | docs or comments only | touches only docs globs | none: the issue is the intent | kickoff | the merger, if the ceiling allows; else you |
 | **T1** | a small, local code change with an obvious test | is code, with no T2/T3 trigger | short, in the issue, plus one failing test | kickoff | the merger, if the ceiling allows; else you |
-| **T2** | new behaviour, a choice you should make, a dependency, a migration | changes a dependency manifest; or an integrity flag raised it (I1 at 300+ files, I2–I4); or changed-line coverage is low (merger only) | a spec file (≤ 60 lines), agreed in an interview | interview, your yes, review, merge | you |
+| **T2** | new behaviour, a choice you should make, a dependency, a migration | changes a dependency manifest; or an integrity flag raised it (I1, I2–I4); or changed-line coverage is low (merger only) | a spec file (≤ 60 lines), agreed in an interview | interview, your yes, review, merge | you |
 | **T3** | auth, money, data deletion, CI, `.claude/`, `.factory/`, a `sensitive` path | touches a gate file or a `[tiers] sensitive` path | as T2, plus design, threats and rollback | as T2, plus `spec-approved` on the PR (declared T3) | you |
 
 **Gate files are always T3:** `.claude/**`, `.factory/**` (except the git-ignored `.factory/work/**`), `.github/**`,
@@ -105,7 +105,7 @@ flowchart LR
 |---|---|
 | Say what you want and why | File the issue, pick and justify a tier |
 | Answer the interview for T2/T3, say yes to the spec | Write the spec into the issue |
-| Add `spec-approved` on a declared-T3 PR | Pin the approved spec's exact content; void the pin if it changes |
+| Add `spec-approved` on a declared-T3 PR | Pin the approved spec's exact content; void the pin if it changes; never add the label itself |
 | Answer Blockers | Stop and ask instead of guessing on anything irreversible or repeated |
 | Review and merge everything above the ceiling | Merge T0/T1 under the ceiling when every check is green |
 | Spend 2 minutes a week on the sampled auto-merges | Pick the sample, count the result in the monthly report |

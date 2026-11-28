@@ -92,7 +92,7 @@ Claude: Filed #57 (tier:T2). Started shape.  Watch: claude attach 9b1e44c0
 - Shape writes one failing test per acceptance check and a spec file (≤ 60 lines) under `docs/specs/`.
 - Build runs your T2 reviews, or the default (one independent review in a fresh context, given only the spec and the
   diff). Findings it can show with a failing test are fixed; the rest go under **Needs you**. The packet carries a
-  `Review: <reviewer>, <n> findings` line.
+  `Review: <reviewer>, <n> findings` line (asked for, not checked).
 - You review and merge. T2 never auto-merges.
 
 ## A sensitive change (T3)
@@ -202,8 +202,9 @@ in between: the branch name is recomputed from them, and `fx ship` then pushes a
   the ceiling auto-merges.
 
 ## An acceptance test is wrong
-The build can't edit the locked tests (the hook denies it, and CI check I1 fails if they change after
-`spec_commit`). It reports the problem under `## Spec issues` in its notes and packet. To fix it:
+The build can't edit the locked tests (the hook denies it, CI check I1 fails if they change after
+`spec_commit`, and CI's own lock raises the PR to T2 if any acceptance test changes after the commit that added
+it). It reports the problem under `## Spec issues` in its notes and packet. To fix it:
 1. Decide whether the test or the spec is wrong.
 2. Re-shape: put the correction into the issue body (the spec block or `Done when:`) and run `fx shape <n>`, which
    writes new tests and a new `spec_commit`. Don't edit the locked test in the build worktree.
@@ -213,8 +214,7 @@ The build can't edit the locked tests (the hook denies it, and CI check I1 fails
 - Usually the build session is still on it: it ran `fx ship` and fixes what failed. Check with `claude attach`.
 - If the session has ended: fix the cause, or `fx build <n>` to start a fresh build that picks up from the notes,
   then it ships again.
-- Packet refused: `fx ship` names the missing heading, the line count, an empty "Not verified", or the missing
-  `Review:` line for T2+.
+- Packet refused: `fx ship` names the missing heading, the line count, or an empty "Not verified".
 
 ## Resume after a crash or reboot
 Nothing is lost: the state is in the worktree (`.factory/work/<n>/`), the notes file and the issue.

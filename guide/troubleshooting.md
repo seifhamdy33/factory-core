@@ -18,9 +18,10 @@
 | `fx ship` push fails after a re-shape | The issue's title or `type:` label changed, so `state.json` names a new branch. Restore the title or label, then `fx ship <n>` |
 | `lock-timeout` | Another worktree's verify holds the slot or lock. Wait, or raise `verify_slots` in `~/.factory/config.toml` |
 | `no-verify-script` | The repo has no `.factory/verify`: `fx shape` again (the shape session writes one), or add it in its own reviewed PR |
-| `fx ship`: packet refused | It names the problem: a missing heading, over 40 lines, an empty Not verified (T1+), no `Review:` line (T2+). Fix `packet.md`, rerun `fx ship <n>` |
+| `fx ship`: packet refused | It names the problem: a missing heading, over 40 lines, an empty Not verified (T1+). Fix `packet.md`, rerun `fx ship <n>` |
 | Ship failed at a stage | `fx status` names it. Fix and rerun `fx ship <n>`, or `fx build <n>` to resume |
 | I1 "locked files changed" or "`spec_commit` not in history" | The build edited a locked test, or the branch was rebased. Re-shape; never rebase a factory branch (merge the default branch in) |
+| I1 "acceptance tests changed after the commit that added them" (T2) | After a re-shape: expected; review and merge it yourself. Otherwise the build changed a test: revert that change |
 | I6 "needs a spec" on a hand-made PR | Expected for T1+ without a factory spec: start it through the factory, or keep it docs-only |
 | I7 "no spec-approved label" / "no factory-pin" | As the approver, add `spec-approved` on the PR |
 | I7 "spec changed after approval" | Read the new spec, then remove `spec-approved` and add it again |
@@ -51,11 +52,13 @@ factory merger: #58 not merging: T2 > auto_merge_ceiling T1: computed T2: change
 - **Local sessions act as you.** There is no separate agent account (D25). Keeping sessions from merging, pushing to
   the default branch or reading secrets is your Claude Code setup's job (deny rules, hooks, permission mode). Without
   a branch ruleset, anything holding your credentials can push to the default branch and skip every gate.
-- **The approver must be a human action.** A `spec-approved` label added through an app is ignored. But a session
-  holding your login could add the label as you; you still merge every T3 yourself.
-- **Hooks and Bash deny rules are best-effort.** A script, `sh -c` or a full path can get around them. CI checks I1
-  and I7 back them up, but both read the spec from the PR branch, so they catch accidents, not a session set on
-  gaming them. Read the locked tests' diff on any PR you review.
+- **I7 is a spec-drift signal, not a lock.** A `spec-approved` label added through an app is ignored, and sessions
+  are told never to add it. But a session holding your login could add it as you, so a green I7 tells you the spec
+  hasn't changed since the label, not that you read it. You still merge every T3 yourself.
+- **Hooks and Bash deny rules are best-effort.** A script, `sh -c` or a full path can get around them. CI backs them up:
+  I1's acceptance lock comes from the base branch's config and the PR's commits, but the `locked` list, `scope`
+  and I7 read the spec on the PR branch, so they catch accidents, not a session set on gaming them. Read the
+  locked tests' diff on any PR you review.
 - **The statuses are information for human merges.** No ruleset requires `factory/*`, and any workflow with
   `statuses: write` could post one. The merger doesn't trust them: it recomputes the tier and integrity itself.
 - **The first overlay PR runs no gates.** The workflow runs from the base branch, so there is nothing to run until it

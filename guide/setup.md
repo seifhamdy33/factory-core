@@ -71,7 +71,6 @@ It reads the stack, test, lint and CI setup, asks only what the repo can't answe
 - a mutation sample (up to 3 most-changed modules, at most 15 minutes) and the ceiling it allows;
 - `.github/workflows/factory.yml` and `factory-merger.yml`, pinned to the current core SHA;
 - optionally `factory-agent.yml` (it asks);
-- 3–5 lines in `CLAUDE.md`, only if it doesn't already say how to run the checks;
 - the labels `spec-approved`, `hold`, `audit:ok`, `escaped` (create `ready`, `triage`, `factory` and, in a
   workspace, `factory:parent` yourself when you need them);
 - a `tier:T3` "Factory onboarding" issue and a spec file scoped to exactly the files the PR changes.
@@ -114,6 +113,11 @@ org repo nothing starts: the workflow checks the event's sender against the repo
 2. Copy `plugins/factory/templates/factory-agent.yml` to `.github/workflows/factory-agent.yml`; fill in
    `__FACTORY_CORE_REPO__` and `__FACTORY_CORE_SHA__` as for the gates. (Onboarding does this if you say yes.)
 3. Create the `factory` label.
+
+What the workflow does to keep repo code away from write tokens: the checkout keeps no credential
+(`persist-credentials: false`), `fx` runs your `setup` command without `GH_TOKEN`, and the interview job can run
+only `gh issue` and `gh label` commands. The build session still has Bash and the action's token, so it could push
+to the default branch. To rule that out, add a branch ruleset that blocks direct pushes to the default branch.
 
 How to use it: [From your phone](workflows.md#from-your-phone-github).
 
