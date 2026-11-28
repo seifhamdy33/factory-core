@@ -86,11 +86,11 @@ def save_state(ctx, **updates):
     os.replace(tmp, ctx["work"] / "state.json")
 
 def extract_block(text):
-    m = re.search(r"<!-- factory:spec -->\s*(.*?)\s*<!-- /factory:spec -->", text or "", re.S)
+    m = re.search(r"<!-- factory:spec -->\s*(.*?)\s*<!-- /factory:spec -->", (text or "").replace("\r\n", "\n"), re.S)
     return m.group(1) if m else None
 
 def load_spec(path=None, text=None):  # -> (meta, body, sections); a spec file, or an issue body with the block
-    text = Path(path).read_text("utf-8") if path is not None else (text or "")
+    text = Path(path).read_text("utf-8") if path is not None else (text or "").replace("\r\n", "\n")  # browser edits
     text = extract_block(text) or text
     m = re.match(r"\s*\+\+\+\s*\n(.*?)\n\+\+\+\s*\n?(.*)", text, re.S)
     meta, body = (tomllib.loads(m.group(1)), m.group(2)) if m else ({}, text)

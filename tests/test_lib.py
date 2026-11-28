@@ -96,6 +96,13 @@ class Spec(unittest.TestCase):
         self.assertEqual(fl.extract_block(issue).splitlines()[0], "+++")
         self.assertEqual(fl.load_spec(text=issue)[0]["id"], 7)
 
+    def test_CrlfIssueBody(self):  # a body edited in the browser (or filed from a CRLF file) comes back with \r\n
+        issue = f"Intro\n\n<!-- factory:spec -->\n{SPEC}<!-- /factory:spec -->\n".replace("\n", "\r\n")
+        self.assertNotIn("\r", fl.extract_block(issue))
+        meta, _, secs = fl.load_spec(text=issue)
+        self.assertEqual((meta["id"], secs["Goal"]), (7, "Do the thing."))
+        self.assertEqual(fl.load_spec(text=SPEC.replace("\n", "\r\n"))[0]["tier"], 1)
+
     def test_NoFrontmatter(self):
         meta, _, secs = fl.load_spec(text="## Goal\nx\n")
         self.assertEqual((meta, secs), ({}, {"Goal": "x"}))
