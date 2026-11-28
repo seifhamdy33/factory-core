@@ -121,6 +121,7 @@ For the CI gates, or to change defaults, make these changes in one PR and review
 1. In a `claude` session in the repo, run `/install-github-app`. It installs the Claude GitHub app and stores the `CLAUDE_CODE_OAUTH_TOKEN` secret (runs bill to your subscription).
 2. Copy `plugins/factory/templates/factory-agent.yml` to `.github/workflows/factory-agent.yml` and fill in `__FACTORY_CORE_REPO__` and `__FACTORY_CORE_SHA__` as for the gates.
 3. Create the `factory` label. Then open an issue as you would for the kickoff (a `tier:T1` label and a `Done when:` line) and add `factory`: the workflow shapes and builds it to a PR, with the hooks in force. Only the repo owner's label starts a run.
+4. For a T2/T3 spec, write `@factory` and the idea in the issue (or a comment on it). The interview asks its questions as issue comments; answer in a comment that includes `@factory`. When the spec is in the issue, adding `factory` approves it and starts the build. Both jobs need a repo you own personally; for an org repo nothing starts.
 
 ## Using it
 

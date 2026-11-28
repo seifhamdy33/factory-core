@@ -420,6 +420,13 @@ class Flows(FactoryTest):
             self.assertEqual(fl.load_json(main / ".factory" / "work" / "7" / "state.json")["phase"], "shape")
             self.assertEqual(fx.worktrees(fl.repo_ctx(main)), {"7": main.resolve()})  # fx build finds the checkout
             self.assertEqual(call("shape", "7")[0], 0)  # a rerun stays on the branch
+            git(main, "commit", "-q", "--allow-empty", "-m", "earlier run")  # a rerun in a fresh checkout: the branch is
+            done = fl.git(main, "rev-parse", "HEAD")                              # only on origin, with an earlier run's work
+            git(main, "update-ref", "refs/remotes/origin/f/7-add-the-thing", done)
+            git(main, "checkout", "-q", "main")
+            git(main, "branch", "-D", "f/7-add-the-thing")
+            self.assertEqual(call("shape", "7")[0], 0)
+            self.assertEqual(fl.git(main, "rev-parse", "HEAD"), done)
 
     def test_LaunchStartsABackgroundSession(self):  # D23: no model flags; fx returns at once and records the session
         main, wt, ctx = self.worktree()

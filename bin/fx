@@ -149,7 +149,8 @@ def cmd_shape(a):
     wt = worktrees(ctx).get(n) or (main / cfg["worktree_root"].format(project=cfg["project"])).resolve() / wname
     if os.environ.get("FACTORY_NEXT"):  # the action runs in the checkout, not a worktree
         wt = main
-        if fl.git(main, "branch", "--show-current") != branch: run(["git", "checkout", "-B", branch, "origin/HEAD"], main)
+        base = f"origin/{branch}" if fl.git(main, "rev-parse", "--verify", "--quiet", f"origin/{branch}") else "origin/HEAD"
+        if fl.git(main, "branch", "--show-current") != branch: run(["git", "checkout", "-B", branch, base], main)  # a rerun
     if not wt.exists():
         has = fl.git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
         run(["git", "worktree", "add", wt, branch] if has else ["git", "worktree", "add", "-b", branch, wt, "origin/HEAD"], main)

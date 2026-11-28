@@ -1,17 +1,39 @@
 name: factory agent
-# The factory on GitHub (Phase 1c). Add the `factory` label to your own issue, from the phone too, and one run shapes
-# it and builds it to a PR with the plugin's hooks in force. As locally, the build runs in a fresh session: with
-# FACTORY_NEXT set, fx writes each next prompt to that file instead of starting `claude --bg`, and the next step runs it.
-# Only the repo owner's label starts a run, and fx refuses an issue someone else opened until it is marked ready (G6).
+# The factory on GitHub (Phase 1c), from the phone too. Two jobs, each started only by the repo owner (a personal repo:
+# for an org, repository_owner is the org and nothing starts):
+# - interview: `@factory` in your issue or comment runs /factory:idea there; it asks its questions as issue comments,
+#   writes the agreed spec into the issue and asks you for the `factory` label.
+# - agent: the `factory` label on your issue shapes it and builds it to a PR, with the plugin's hooks in force. As
+#   locally, the build runs in a fresh session: with FACTORY_NEXT set, fx writes each next prompt to that file instead
+#   of starting `claude --bg`, and the next step runs it. fx refuses an issue someone else opened until it is ready (G6).
 # Needs the Claude GitHub app and a CLAUDE_CODE_OAUTH_TOKEN secret (`/install-github-app` sets up both).
 on:
   issues:
-    types: [labeled]
+    types: [opened, labeled]
+  issue_comment:
+    types: [created]
 permissions: {}
 concurrency:
   group: factory-agent-${{ github.event.issue.number }}
   cancel-in-progress: false
 jobs:
+  interview:
+    if: >-
+      github.event.sender.login == github.repository_owner && !github.event.issue.pull_request &&
+      (github.event.action == 'opened' && contains(github.event.issue.body, '@factory') ||
+      github.event_name == 'issue_comment' && contains(github.event.comment.body, '@factory'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions: {contents: read, issues: write, id-token: write}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: https://github.com/__FACTORY_CORE_REPO__.git
+          plugins: factory@factory-core
+          claude_args: --allowedTools Bash,Read,Glob,Grep,Skill
+          prompt: "/factory:idea on GitHub: #${{ github.event.issue.number }}"
   agent:
     if: github.event.label.name == 'factory' && github.event.sender.login == github.repository_owner
     runs-on: ubuntu-latest
@@ -39,7 +61,7 @@ jobs:
         run: '{ echo "prompt<<FACTORY_EOF"; cat "$FACTORY_NEXT"; echo; echo FACTORY_EOF; } >> "$GITHUB_OUTPUT" && rm "$FACTORY_NEXT"'
       - name: shape session
         uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1
-        env: {FACTORY_PHASE: shape}  # the hooks' phase: state.json says build once the shape session runs fx build
+        env: {FACTORY_PHASE: shape}  # pins the hooks' phase for the session: shape's own fx build sets state.json to build
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: https://github.com/__FACTORY_CORE_REPO__.git
@@ -53,7 +75,7 @@ jobs:
       - name: build session
         if: steps.build.outputs.prompt != ''
         uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1
-        env: {FACTORY_PHASE: build}  # the hooks' phase: state.json says build once the shape session runs fx build
+        env: {FACTORY_PHASE: build}  # pins the hooks' phase for the session: shape's own fx build sets state.json to build
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: https://github.com/__FACTORY_CORE_REPO__.git
