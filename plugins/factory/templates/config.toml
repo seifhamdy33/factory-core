@@ -38,6 +38,12 @@ approver = ""                                 # the GitHub login whose spec-appr
 # agents = []                                 # PR authors the merger accepts; default: the owner, claude[bot],
                                               #   factory-agent[bot]
 
+# [mutation]                                  # absent by default; written by /factory:onboard; the score caps the merger's ceiling:
+# score = 0                                   #   >= 60 -> T1, 40-59 -> T0, < 40 -> no auto-merge; absent -> T0
+# date = "YYYY-MM-DD"
+# tool = "mutmut 3.x"
+# sample = []                                 # the modules the sample ran on
+
 [coverage]                                    # the merger reads it from the repo's CI; missing or low -> T2 (G1)
 # artifact = "coverage"                       # the artifact a successful pull_request run uploads
 # path = "lcov.info"                          # the LCOV file inside it

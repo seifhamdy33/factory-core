@@ -32,6 +32,17 @@ def coverage(api, cfg, pr):
                 continue
     return f"no `{c['artifact']}` artifact holding {c['path']} from a successful pull_request run at {head[:12]}"
 
+def mutation_score(cfg):
+    m = cfg.get("mutation")
+    s = m.get("score") if isinstance(m, dict) else None
+    return s if isinstance(s, (int, float)) and not isinstance(s, bool) else None
+
+def mutation_ceiling(cfg):
+    """D26: the recorded mutation score caps the ceiling. >= 60% T1, 40-59% T0, below 40% no auto-merge (-1).
+    No score recorded (no /factory:onboard sample yet): T0, which needs no tests."""
+    score = mutation_score(cfg)
+    return 0 if score is None else 1 if score >= 60 else 0 if score >= 40 else -1
+
 def checks_red(api, head):
     """Every check run and commit status on the head must be green, and both factory statuses present."""
     bad = [c.get("name") for c in api.get_all(f"commits/{head}/check-runs", key="check_runs", pages=3)
@@ -44,6 +55,11 @@ def decide(api, n, owner):
     pr, cfg, t, reasons, flags, _ = gates.assess(api, n, coverage=lambda c, p: coverage(api, c, p), allow_head=False)
     au, login, why, head = cfg["authority"], (pr.get("user") or {}).get("login"), [], pr["head"]["sha"]
     agents, ceiling = au["agents"] or [owner, "claude[bot]", "factory-agent[bot]"], au["auto_merge_ceiling"]
+    if capped := (cap := mutation_ceiling(cfg)) < ceiling:
+        ceiling = cap
+    ceil = ("no auto-merge (mutation score below 40%)" if ceiling < 0 else
+            f"auto_merge_ceiling T{ceiling}" + ("" if not capped else " (capped by the mutation score)"
+                                                 if mutation_score(cfg) is not None else " (no mutation score recorded)"))
     if pr.get("state") != "open" or pr.get("draft"):
         why.append("not an open, ready PR")
     if login not in agents:
@@ -51,14 +67,14 @@ def decide(api, n, owner):
     if "hold" in {lb["name"] for lb in pr.get("labels", [])}:
         why.append("the `hold` label is on")
     if t > ceiling:
-        why.append(f"T{t} > auto_merge_ceiling T{ceiling}: {reasons[0]}")
+        why.append(f"T{t} > {ceil}: {reasons[0]}")
     if fails := [f.code for f in flags if f.kind == "fail"]:
         why.append(f"integrity fails: {', '.join(fails)}")
     if (api.get(f"compare/{q(pr['base']['ref'])}...{head}") or {}).get("behind_by", 1):
         why.append(f"behind {pr['base']['ref']}: update the branch")
     if red := checks_red(api, head):
         why.append(f"checks not green: {', '.join(map(str, red))}")
-    return not why, why or [f"T{t} <= T{ceiling}: {reasons[0]}; {reasons[-1]}"], head
+    return not why, why or [f"T{t} <= {ceil}: {reasons[0]}; {reasons[-1]}"], head
 
 def main(env=os.environ, api=None, merge_api=None):
     run = json.loads(Path(env["GITHUB_EVENT_PATH"]).read_text("utf-8")).get("workflow_run") or {}

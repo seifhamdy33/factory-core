@@ -109,7 +109,7 @@ Run `claude` once in the repo's main checkout and accept the trust prompt. Its w
 ### 4. Optional: an overlay and the CI gates
 Without an overlay, the core defaults apply and the project name is the GitHub repo name. `fx shape` keeps `.factory/work/` out of git through `.git/info/exclude`, and the shape session writes `.factory/verify`. That makes the first PR in the repo compute T3, because `.factory/` is a gate file, so review it closely.
 
-For the CI gates, or to change defaults, make these changes in one PR and review it yourself. It's a T3 change, and the gates don't run on the PR that adds their workflow.
+`/factory:onboard` (in a `claude` session in the repo) does steps 1–5 and the merger's workflow for you, samples a mutation score and opens it all as one PR. By hand: for the CI gates, or to change defaults, make these changes in one PR and review it yourself. It's a T3 change, and the gates don't run on the PR that adds their workflow.
 1. Copy `plugins/factory/templates/config.toml` to `.factory/config.toml`. Set only what differs from the defaults, typically `[authority] approver` (needed for T3) and `[tiers] sensitive`.
 2. Copy `plugins/factory/templates/verify.sh` to `.factory/verify` and make it executable. Fill in the `--fast` checks (lint, typecheck and related tests, under ~5 minutes) and the `--full` checks.
 3. Add `.factory/work/` to `.gitignore`.
@@ -178,6 +178,7 @@ Every refusal prints its cause and a single `Next:` line to follow. To watch a b
 ### Skills
 - `/factory:idea <text>`: the kickoff. Claude also uses it when you explicitly ask for the factory.
 - `/factory:shape <n>`: started by `fx shape`; you don't normally run it.
+- `/factory:onboard`: proposes the overlay, `.factory/verify`, the workflows and an auto-merge ceiling from a mutation sample, as one T3 PR. Rerun it to propose only what changed.
 
 ## Features
 
@@ -237,6 +238,10 @@ Comments are never trusted as approval, because any workflow can post as `github
 - **`summary`:** median and p90 tokens per change by tier (input + output + cache writes; cache reads are excluded) and counts. It adds the weekly usage line only if your statusline writes `weekly.csv`.
 - **`audit`:** sessions that ended while verify was red, build sessions the Stop gate never saw, PRs shipped red, sessions that ended at a block, test-lock denies, and fast verifies over budget.
 
+`metrics/report.py` reads the repo's closed PRs through `gh api` (run it in the repo, or pass `--repo o/r`):
+- **monthly** (`--days 30`, `--out FILE`): per tier, merged and auto-merged PRs, rework, escaped, change failure, tokens per change (from the ledger), lead time, review time, rubber-stamps and gate yield. Definitions: D26 and the report's last line.
+- **`--weekly`:** 1 in 5 auto-merged T0/T1 PRs of the last complete ISO week (or `--week 2026-W48`), the same picks on every run. Read each and label it `audit:ok` or `escaped`; the monthly report counts both.
+
 ## Configuration reference
 
 ### Overlay: `.factory/config.toml` (optional)
@@ -261,6 +266,7 @@ Set only what differs. The defaults live in `plugins/factory/lib/factory_lib.py`
 | `[integrity] threshold_globs` | jest, vitest, eslint, tsconfig, `.coveragerc`, `.nycrc` | Threshold config (I3) |
 | `[integrity] assert`, `skip`, `suppress` | `[]` | Extra regexes, added to the core lists (I2) |
 | `[authority] approver` | `""` | Login whose `spec-approved` counts. Required for T3. |
+| `[mutation] score`, `date`, `tool`, `sample` | absent | Written by `/factory:onboard`. The score (percent) caps the merger's ceiling. |
 | `[packet] max_lines`, `extra`, `[packet.headings]` | 40, `[]`, the defaults | Packet shape |
 | `[workspace] repos`, `order` | absent | Multi-repo workspace: `{key = {path, repo}}` and the merge order |
 

@@ -10,6 +10,7 @@ BUDGETS = {
     "plugins/factory/lib/factory_lib.py": 260,  # owner 2026-11-27: raised from 200 (Windows Job Object tree kill); 2026-11-28: to 260 (G6, Phase 1c)
     "plugins/factory/skills/idea/SKILL.md": 50,  # D23: it now holds the interview
     "plugins/factory/skills/shape/SKILL.md": 60,
+    "plugins/factory/skills/onboard/SKILL.md": 70,  # new in Phase 3 (D26), stated to the owner
     "bin/fx": 375,  # owner 2026-11-27: raised from 220 to 340 (waiting list, pin check, ship), then to 345 (setup); 2026-11-28: to 375 (G6, Phase 1c)
     "bin/fx.cmd": 1,
     "ci/gates.py": 200,
@@ -17,9 +18,10 @@ BUDGETS = {
     "ci/integrity.py": 200,
     "ci/merger.py": 120,  # new in Phase 2 (D24), stated to the owner
     "metrics/ledger.py": 150,
+    "metrics/report.py": 180,  # new in Phase 3 (D26), stated to the owner
 }
 CODE_DIRS = ("ci", "plugins/factory", "bin", "metrics", "user")
-LOCAL_MODULES = {"factory_lib", "gates", "tier", "integrity", "merger"}
+LOCAL_MODULES = {"factory_lib", "gates", "tier", "integrity", "merger", "ledger"}
 PILOT_NAMES = re.compile(r"livlyte|seif-livlyte|seifhamdy")
 
 
