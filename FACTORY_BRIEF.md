@@ -282,6 +282,26 @@ Multi-agent orchestration by default; spec-framework templates (PRDs, user stori
 
 ## 5. Phases
 
+### Status (2026-11-28)
+**Done, proved on the dummy repo `factory-dummy` only** (the owner's pilot repos stay untouched until the owner onboards them):
+- Phase 0, Phase 1, Phase 1b (D23, #1–#4), Phase 1c (#5–#9), Phase 2 (D24, D25, #10–#12; red-team (a)–(j) passed, (g) dropped by D25), Phase 3 tasks 1, 2, 4 and 5 (D26, #13, #14).
+
+**The gap that comes first: real use.** The 2 weeks of use on a real pilot repo (Phase 1) haven't happened; every metric so far is test traffic. Phases 4 and 5 need real data (past PRs, a noise floor, review incidents). Order:
+1. Phase 3 task 3: the owner runs `/factory:onboard` in each active repo, reads the spec issue, adds `spec-approved`, merges.
+2. About 2 weeks of real use. The owner records the weekly `/usage` % every Monday in `~/.factory/metrics/weekly.csv` (nothing records it yet; Phase 4's budget check and the report's weekly % need it).
+3. Phase 4, then 5. Phase 6 only once Phases 1–3 run smoothly on a real app with deploys. Phase 7's first monthly run needs a month of data.
+
+**Can start before real data:** the Phase 4 runner, proved on the dummy's past PRs as stand-in tasks; the Phase 7 `/factory:factory-maintain` skill; the known debts below.
+
+**Known debts** (none blocks the dummy; each names where it would be fixed):
+- `factory-agent.yml` loads the plugin from core main unpinned (`plugin_marketplaces`), while its `fx` is pinned, so skills can drift from `fx` after a core push. Template, Phase 1c surface.
+- On the GitHub surface the agent runs with the Claude App's token and Bash, outside the local gh-guard; only the prompt keeps it from merging (D25 known gap). The user's setup closes it (allowed tools, App permissions, or a ruleset).
+- Nits left from #4's review: stale sessions/stop in one `save_state` update, a core path with spaces, a stale Blocker hash when an identical Blocker repeats. `bin/fx` (375/375, full), `plugins/factory/lib/factory_lib.py` (260/260, full).
+- `metrics/report.py`: no Sentry attribution of escaped defects (Phase 6), one repo per run, a revert counts only when the reverted PR merged in the same window (D26).
+- The merger's refusal under a 40% mutation score and onboard's "raise verification" issue are unit-tested only; the dummy scores 77%.
+- `plugins/factory/.claude-plugin/plugin.json` still says "(Phase 1)" and has no author or icon (`claude plugin validate` warnings).
+- An empty `.claude/worktrees/factory-onboard` folder in the dummy that Windows still held open.
+
 ### Phase 0: Platform check (≈ half a day)
 Tasks:
 1. Verify against current docs and record in `docs/platform-facts.md`:
