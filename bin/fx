@@ -102,23 +102,34 @@ def ledger(w, url):
          "--tier", st.get("tier", 1), "--branch", w["branch"], "--worktree", w["root"], "--pr", url,
          *(["--parent", st["parent"]] if st.get("parent") else [])], w["root"])
 
-def intake(repo, n, iss, cfg):  # G6: act only on the owner's issues, or on ones the owner or approver marked ready
+EDITS = ("query($o: String!, $r: String!, $n: Int!) { repository(owner: $o, name: $r) { issue(number: $n) "
+         "{ userContentEdits(last: 100) { nodes { editedAt editor { login } } } } } }")  # REST has no body edit history
+
+def intake(repo, n, iss, cfg, cmd):  # G6: act only on the owner's issues, or on ones the owner or approver marked ready
     me, labels, author = run(["gh", "api", "user", "--jq", ".login"]), {lb["name"] for lb in iss["labels"]}, \
-        (iss.get("author") or {}).get("login")
-    if "triage" in labels or author != me:
-        who = sorted({me, cfg["authority"]["approver"]} - {""})
-        by = run(["gh", "api", "--paginate", f"repos/{repo}/issues/{n}/events", "--jq",
-                  '.[] | select(.event == "labeled" and .label.name == "ready") | .actor.login']).split()
-        if "ready" not in labels or not by or by[-1] not in who:  # the latest `ready` decides, and it must still be on
-            why = "is labelled triage" if "triage" in labels else f"was opened by {author or 'someone else'}"
-            refuse(f"#{n} {why}, and the owner hasn't marked it ready (G6)",
-                   f"as {' or '.join(who)}, add the ready label to #{n}, then fx shape {n}")
+        (iss.get("author") or {}).get("login") or "someone else"
+    if "triage" in labels or author.lower() != me.lower():  # logins are case-insensitive
+        who = sorted({me, cfg["authority"]["approver"]} - {""}, key=str.lower)
+        ok, again = {x.lower() for x in who}, f"as {' or '.join(who)}, remove the ready label from #{n} and add it again"
+        ev = run(["gh", "api", "--paginate", f"repos/{repo}/issues/{n}/events", "--jq", '.[] | select(.event == "labeled"'
+                  ' and .label.name == "ready") | .actor.login + " " + .created_at']).split()
+        by, at = (ev[-2].lower(), ev[-1]) if ev else ("", "")
+        if "ready" not in labels or by not in ok:  # the latest `ready` decides, and it must still be on
+            why = "is labelled triage" if "triage" in labels else f"was opened by {author}"
+            refuse(f"#{n} {why}, and the owner hasn't marked it ready (G6)", f"{again}, then fx {cmd} {n}" if "ready" in
+                   labels else f"as {' or '.join(who)}, add the ready label to #{n}, then fx {cmd} {n}")
+        o, r = repo.split("/")
+        edits = run(["gh", "api", "graphql", "-F", f"n={n}", "-f", f"o={o}", "-f", f"r={r}", "-f", f"query={EDITS}", "--jq",
+                     '.data.repository.issue.userContentEdits.nodes[] | (.editor.login // "ghost") + " " + .editedAt'])
+        if late := sorted({e.split()[0] for e in edits.splitlines() if e.split()[1] > at and e.split()[0].lower() not in ok}):
+            refuse(f"#{n} was edited by {', '.join(late)} after it was marked ready (G6)",
+                   f"read #{n} again; if it is still right, {again}, then fx {cmd} {n}")
 
 def cmd_shape(a):
     ctx, n, _ = resolve(a.ref)
     cfg, repo = ctx["cfg"], ctx["repo"]
     iss = gh_json("issue", "view", n, "-R", repo, "--json", "title,labels,body,author")
-    intake(repo, n, iss, cfg)
+    intake(repo, n, iss, cfg, "shape")
     if "workspace" in cfg and "factory:parent" in {lb["name"] for lb in iss["labels"]}:
         refuse(f"#{n} is a workspace parent: /factory:idea split it into slices", "fx shape <key>#<slice> for each slice")
     main = main_root(ctx["root"])
@@ -150,7 +161,8 @@ def cmd_shape(a):
 def cmd_build(a):
     w, n, ref = worktree_ctx(a.ref)
     cfg, wt, rel = w["cfg"], w["root"], f".factory/work/{n}"
-    iss = gh_json("issue", "view", n, "-R", w["repo"], "--json", "title,labels,body")
+    iss = gh_json("issue", "view", n, "-R", w["repo"], "--json", "title,labels,body,author")
+    intake(w["repo"], n, iss, cfg, "build")  # again: the build reads the body, which may have changed since shape
     spec = spec_file(wt, cfg, n)
     t = max(label_tier(iss["labels"], w["state"].get("tier", 1)), tier.tier_num(spec and fl.load_spec(wt / spec)[0].get("tier")) or 0)
     if t >= 2:  # a T3 spec is approved on the PR (I7), not before the build

@@ -283,29 +283,43 @@ class Flows(FactoryTest):
         launch.assert_not_called()
 
     def test_ShapeIntakeGuard(self):  # G6: only the owner's issues, or ones the owner or approver marked ready
-        main = self.main_repo(cfg='project = "demo"\n[authority]\napprover = "boss"\n')
+        main = self.main_repo(cfg='project = "demo"\n[authority]\napprover = "Boss"\n')  # logins ignore case
         self.remote_head(main)
-        events = "gh api --paginate repos/o/r/issues/7/events"
-        cases = [  # (author, labels, `ready` labelers in order, shapes?)
-            ("owner", [], [], True),
-            ("owner", ["triage"], [], False),
-            ("stranger", [], [], False),
-            ("app/sentry", ["ready"], ["stranger"], False),  # ready from someone else doesn't count
-            ("stranger", ["ready"], ["boss"], True),  # the approver's ready counts
-            ("stranger", ["ready", "triage"], ["owner"], True),
-            ("stranger", ["ready"], ["owner", "stranger"], False),  # the latest ready event decides
-            ("stranger", [], ["owner"], False),  # ready was removed again
+        add, again = "add the ready label to #7", "remove the ready label from #7 and add it again"
+        cases = [  # (author, labels, `ready` labelers in order, body editors, refusal or None)
+            ("owner", [], [], ["stranger"], None),  # the owner's own issue: no ready needed
+            ("owner", ["triage"], [], [], ("is labelled triage", add)),
+            ("stranger", [], [], [], ("was opened by stranger", add)),
+            ("app/sentry", ["ready"], ["stranger"], [], ("was opened by app/sentry", again)),  # not the owner's ready
+            ("stranger", ["ready"], ["boss"], [], None),  # the approver's ready counts
+            ("stranger", ["ready", "triage"], ["owner"], ["stranger@1", "owner@3"], None),  # edited before ready, or by us
+            ("stranger", ["ready"], ["owner", "stranger"], [], ("was opened by stranger", again)),  # the latest decides
+            ("stranger", [], ["owner"], [], ("was opened by stranger", add)),  # ready was removed again
+            ("stranger", ["ready"], ["owner"], ["stranger@3"], "edited"),  # changed after the owner read it
         ]
-        for author, labels, by, ok in cases:
-            with self.subTest(author=author, labels=labels, by=by):
+        for author, labels, by, edits, refused in cases:
+            with self.subTest(author=author, labels=labels, by=by, edits=edits):
+                stamp = lambda e: f"{e.split('@')[0]} 2026-01-0{e.split('@')[1] if '@' in e else 2}T00:00:00Z"
                 fake = FakeRun({"gh issue view": {"title": "Add the Thing", "author": {"login": author}, "body": "",
-                                                  "labels": [{"name": lb} for lb in labels]}, events: "\n".join(by)})
+                                                  "labels": [{"name": lb} for lb in labels]},
+                                "gh api --paginate repos/o/r/issues/7/events": "\n".join(map(stamp, by)),
+                                "gh api graphql": "\n".join(map(stamp, edits))})
                 code, _, err, launch = self.fx_in(main, fake, "shape", "7")
-                self.assertEqual((code, launch.called), (0, True) if ok else (1, False), err)
-                if not ok:
-                    why = "is labelled triage" if "triage" in labels else f"was opened by {author}"
-                    self.assertIn(f"#7 {why}, and the owner hasn't marked it ready (G6)\n"
-                                  "Next: as boss or owner, add the ready label to #7, then fx shape 7", err)
+                self.assertEqual((code, launch.called), (1, False) if refused else (0, True), err)
+                if refused == "edited":
+                    self.assertIn("#7 was edited by stranger after it was marked ready (G6)\nNext: read #7 again; if it"
+                                  f" is still right, as Boss or owner, {again}, then fx shape 7", err)
+                elif refused:
+                    self.assertIn(f"#7 {refused[0]}, and the owner hasn't marked it ready (G6)\n"
+                                  f"Next: as Boss or owner, {refused[1]}, then fx shape 7", err)
+
+    def test_BuildIntakeGuard(self):  # G6 again at build: the body may change between shape and build
+        _, wt, _ = self.worktree()
+        fake = FakeRun({"gh issue view": {"title": "T", "author": {"login": "stranger"}, "body": "", "labels": []}})
+        code, _, err, launch = self.fx_in(wt, fake, "build", "7")
+        self.assertEqual(code, 1)
+        self.assertIn("Next: as owner, add the ready label to #7, then fx build 7", err)
+        launch.assert_not_called()
 
     def test_ShapeCreatesWorktreeAndState(self):
         main = self.main_repo()

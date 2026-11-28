@@ -306,7 +306,7 @@ Template: `user/factory.toml`.
 | `claude --bg did not start: Workspace not trusted` | Run `claude` once in the repo's main checkout and accept the prompt, then rerun |
 | A background session seems stuck | `claude attach <id>` (the id is in the `Watch:` line and in `state.json`). It may be waiting on a permission prompt: see the assumptions under Setup. |
 | `fx` lists a Blocker | Read the notes or the issue comment, answer on the issue or fix the cause, then `fx build <n>` |
-| `fx shape` says the owner hasn't marked it ready (G6) | Someone else opened the issue, or it is labelled `triage`. Read it; if it should be built, add `ready` yourself (or as the approver) |
+| `fx shape` or `fx build` says the owner hasn't marked it ready, or that it was edited after (G6) | Someone else opened or edited the issue, or it is labelled `triage`. Read it; if it should be built, add `ready` yourself or as the approver (if it is already on, remove it and add it again) |
 | `lock-timeout` | Another worktree's verify holds the slot or lock. Wait, or raise `verify_slots` in `~/.factory/config.toml`. |
 | `no-verify-script` | The repo has no `.factory/verify`: `fx shape` again lets the shape session write one, or add it in its own reviewed PR |
 | I6 "needs a spec" on a hand-made PR | Expected for T1+ without a factory spec; start it through the factory, or keep it T0 |
