@@ -25,7 +25,7 @@ class FakeRun:
     """Stands in for fx.run: answers gh calls from `gh`, records everything, runs real git unless faked."""
 
     def __init__(self, gh=None, fake_git=("push", "fetch")):
-        self.gh, self.fake_git, self.calls = gh or {}, fake_git, []
+        self.gh, self.fake_git, self.calls = {"gh api user": "owner", **(gh or {})}, fake_git, []
 
     def __call__(self, cmd, cwd=None):
         cmd = [str(c) for c in cmd]
@@ -33,6 +33,8 @@ class FakeRun:
         if cmd[0] == "gh":
             key = next((k for k in self.gh if " ".join(cmd).startswith(k)), None)
             val = self.gh.get(key, "")
+            if key == "gh issue view" and isinstance(val, dict):  # issues are the owner's unless a test says not (G6)
+                val = {"author": {"login": "owner"}, **val}
             return val if isinstance(val, str) else json.dumps(val)
         if cmd[0] == "git" and cmd[1] in self.fake_git or cmd[0] != "git":
             return ""
@@ -279,6 +281,31 @@ class Flows(FactoryTest):
         self.assertEqual(code, 1)
         self.assertIn("#7 is a workspace parent: /factory:idea split it into slices\nNext: fx shape <key>#<slice>", err)
         launch.assert_not_called()
+
+    def test_ShapeIntakeGuard(self):  # G6: only the owner's issues, or ones the owner or approver marked ready
+        main = self.main_repo(cfg='project = "demo"\n[authority]\napprover = "boss"\n')
+        self.remote_head(main)
+        events = "gh api --paginate repos/o/r/issues/7/events"
+        cases = [  # (author, labels, `ready` labelers in order, shapes?)
+            ("owner", [], [], True),
+            ("owner", ["triage"], [], False),
+            ("stranger", [], [], False),
+            ("app/sentry", ["ready"], ["stranger"], False),  # ready from someone else doesn't count
+            ("stranger", ["ready"], ["boss"], True),  # the approver's ready counts
+            ("stranger", ["ready", "triage"], ["owner"], True),
+            ("stranger", ["ready"], ["owner", "stranger"], False),  # the latest ready event decides
+            ("stranger", [], ["owner"], False),  # ready was removed again
+        ]
+        for author, labels, by, ok in cases:
+            with self.subTest(author=author, labels=labels, by=by):
+                fake = FakeRun({"gh issue view": {"title": "Add the Thing", "author": {"login": author}, "body": "",
+                                                  "labels": [{"name": lb} for lb in labels]}, events: "\n".join(by)})
+                code, _, err, launch = self.fx_in(main, fake, "shape", "7")
+                self.assertEqual((code, launch.called), (0, True) if ok else (1, False), err)
+                if not ok:
+                    why = "is labelled triage" if "triage" in labels else f"was opened by {author}"
+                    self.assertIn(f"#7 {why}, and the owner hasn't marked it ready (G6)\n"
+                                  "Next: as boss or owner, add the ready label to #7, then fx shape 7", err)
 
     def test_ShapeCreatesWorktreeAndState(self):
         main = self.main_repo()

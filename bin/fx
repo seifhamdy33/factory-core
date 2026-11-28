@@ -102,10 +102,23 @@ def ledger(w, url):
          "--tier", st.get("tier", 1), "--branch", w["branch"], "--worktree", w["root"], "--pr", url,
          *(["--parent", st["parent"]] if st.get("parent") else [])], w["root"])
 
+def intake(repo, n, iss, cfg):  # G6: act only on the owner's issues, or on ones the owner or approver marked ready
+    me, labels, author = run(["gh", "api", "user", "--jq", ".login"]), {lb["name"] for lb in iss["labels"]}, \
+        (iss.get("author") or {}).get("login")
+    if "triage" in labels or author != me:
+        who = sorted({me, cfg["authority"]["approver"]} - {""})
+        by = run(["gh", "api", "--paginate", f"repos/{repo}/issues/{n}/events", "--jq",
+                  '.[] | select(.event == "labeled" and .label.name == "ready") | .actor.login']).split()
+        if "ready" not in labels or not by or by[-1] not in who:  # the latest `ready` decides, and it must still be on
+            why = "is labelled triage" if "triage" in labels else f"was opened by {author or 'someone else'}"
+            refuse(f"#{n} {why}, and the owner hasn't marked it ready (G6)",
+                   f"as {' or '.join(who)}, add the ready label to #{n}, then fx shape {n}")
+
 def cmd_shape(a):
     ctx, n, _ = resolve(a.ref)
     cfg, repo = ctx["cfg"], ctx["repo"]
-    iss = gh_json("issue", "view", n, "-R", repo, "--json", "title,labels,body")
+    iss = gh_json("issue", "view", n, "-R", repo, "--json", "title,labels,body,author")
+    intake(repo, n, iss, cfg)
     if "workspace" in cfg and "factory:parent" in {lb["name"] for lb in iss["labels"]}:
         refuse(f"#{n} is a workspace parent: /factory:idea split it into slices", "fx shape <key>#<slice> for each slice")
     main = main_root(ctx["root"])
